@@ -107,7 +107,14 @@ function Test-TokenHasScope {
     if (-not $SavedToken.scope) {
         return $false
     }
-    return @("$($SavedToken.scope)" -split "\s+") -contains $RequiredScope
+    $scopes = @("$($SavedToken.scope)" -split "\s+")
+    if ($scopes -contains $RequiredScope) {
+        return $true
+    }
+    if ($RequiredScope -eq $GmailReadOnlyScope -and ($scopes -contains $GmailModifyScope)) {
+        return $true
+    }
+    return $false
 }
 
 function Receive-LoopbackCode {
@@ -455,8 +462,11 @@ function New-FlightTravelItem {
     )
 
     $normalizedFlight = Normalize-FlightNumber -Value $FlightNumber
+    $destination = if ($To) { Get-AirportCityName -Airport $To } else { "" }
+    $name = if ($destination) { "Flight to $destination ($normalizedFlight)" } else { "$normalizedFlight $From -> $To" }
+
     $item = @{
-        Name = "$normalizedFlight $From -> $To"
+        Name = $name
         Kind = "Flight"
         Status = "Confirmed"
         Start = $Start
@@ -474,6 +484,41 @@ function New-FlightTravelItem {
     }
     $item["UniqueKey"] = Get-FlightKey -Item $item
     return $item
+}
+
+function Get-AirportCityName {
+    param([string]$Airport)
+
+    $map = @{
+        ATL = "Atlanta"
+        AUS = "Austin"
+        BOS = "Boston"
+        CLT = "Charlotte"
+        DCA = "Washington"
+        DEN = "Denver"
+        DFW = "Dallas"
+        EWR = "Newark"
+        IAD = "Washington"
+        IAH = "Houston"
+        JFK = "New York"
+        LAS = "Las Vegas"
+        LAX = "Los Angeles"
+        LGA = "New York"
+        MCI = "Kansas City"
+        MDW = "Chicago"
+        MIA = "Miami"
+        MSN = "Madison"
+        ORD = "Chicago"
+        PHX = "Phoenix"
+        ROC = "Rochester"
+        SEA = "Seattle"
+        SFO = "San Francisco"
+    }
+
+    if ($Airport -and $map.ContainsKey($Airport.ToUpperInvariant())) {
+        return $map[$Airport.ToUpperInvariant()]
+    }
+    return ""
 }
 
 function Get-AirportTimeZoneId {
@@ -766,6 +811,23 @@ function DateValue {
     return @{ date = @{ start = $Value } }
 }
 
+function DateRangeValue {
+    param([string]$Start, [string]$End)
+    if (-not $Start) { return $null }
+    $date = @{ start = $Start }
+    if ($End) {
+        try {
+            $startOffset = [DateTimeOffset]::Parse($Start)
+            $endOffset = [DateTimeOffset]::Parse($End)
+            $date["end"] = $endOffset.ToOffset($startOffset.Offset).ToString("yyyy-MM-ddTHH:mm:sszzz")
+        }
+        catch {
+            $date["end"] = $End
+        }
+    }
+    return @{ date = $date }
+}
+
 function Invoke-NotionApi {
     param(
         [string]$Method,
@@ -814,7 +876,7 @@ function Add-TravelItem {
         Name = TitleValue $Item.Name
         Kind = SelectValue $Item.Kind
         Status = SelectValue $Item.Status
-        Start = DateValue $Item.Start
+        Start = DateRangeValue -Start $Item.Start -End $Item.End
         Provider = TextValue $Item.Provider
         "Confirmation Code" = TextValue $Item.ConfirmationCode
         "Flight Number" = TextValue $Item.FlightNumber
