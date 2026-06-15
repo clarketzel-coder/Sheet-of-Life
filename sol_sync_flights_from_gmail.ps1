@@ -859,7 +859,7 @@ function Test-NotionTravelDatabase {
     param([string]$NotionToken)
 
     $database = Invoke-NotionApi -Method "GET" -Path "/databases/$TravelDatabaseId" -NotionToken $NotionToken
-    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Source Message ID", "Source Subject", "Unique Key", "Notes")
+    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Calendar Time", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Source Message ID", "Source Subject", "Unique Key", "Notes")
     $missingProperties = @($requiredProperties | Where-Object { -not $database.properties.PSObject.Properties.Name.Contains($_) })
 
     if ($missingProperties.Count -gt 0) {
@@ -876,7 +876,8 @@ function Add-TravelItem {
         Name = TitleValue $Item.Name
         Kind = SelectValue $Item.Kind
         Status = SelectValue $Item.Status
-        Start = DateRangeValue -Start $Item.Start -End $Item.End
+        Start = DateValue $Item.Start
+        "Calendar Time" = DateRangeValue -Start $Item.Start -End $Item.End
         Provider = TextValue $Item.Provider
         "Confirmation Code" = TextValue $Item.ConfirmationCode
         "Flight Number" = TextValue $Item.FlightNumber
