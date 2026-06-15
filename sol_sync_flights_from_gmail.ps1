@@ -8,6 +8,7 @@ param(
     [string]$EventsDatabaseId = "37fe8e29-9eae-8113-9cc4-c88edca64657",
     [string]$TravelDatabaseId = "380e8e29-9eae-8119-a19e-f9f743f62bff",
     [switch]$FileProcessedEmail,
+    [switch]$FileImportedEmail,
     [string]$ProcessedLabelName = "Travel",
     [switch]$ArchiveProcessedEmail,
     [string]$NotionVersion = "2022-06-28",
@@ -94,7 +95,7 @@ function Invoke-GoogleTokenRequest {
 }
 
 function Get-RequiredGmailScope {
-    if ($FileProcessedEmail -or $ArchiveProcessedEmail) {
+    if ($FileProcessedEmail -or $FileImportedEmail -or $ArchiveProcessedEmail) {
         return $GmailModifyScope
     }
     return $GmailReadOnlyScope
@@ -854,12 +855,28 @@ if ($CheckNotion) {
 
 $accessToken = Get-GmailAccessToken
 $processedLabelId = ""
-if ($FileProcessedEmail) {
+if ($FileProcessedEmail -or $FileImportedEmail) {
     $processedLabelId = Get-GmailLabelId -AccessToken $accessToken -LabelName $ProcessedLabelName
 }
 $state = Load-State
 $imported = @($state.importedMessageIds)
 $importedSegmentKeys = if ($state.PSObject.Properties.Name.Contains("importedSegmentKeys")) { @($state.importedSegmentKeys) } else { @() }
+
+if ($FileImportedEmail) {
+    if ($imported.Count -eq 0) {
+        Write-Host "No imported Gmail message IDs were found in local travel sync state."
+        return
+    }
+
+    foreach ($messageId in @($imported | Select-Object -Unique)) {
+        Set-GmailProcessedMessage -AccessToken $accessToken -MessageId $messageId -LabelId $processedLabelId
+        $actions = @()
+        if ($FileProcessedEmail) { $actions += "labeled '$ProcessedLabelName'" }
+        if ($ArchiveProcessedEmail) { $actions += "archived from Inbox" }
+        Write-Host "Filed imported Gmail message ${messageId}: $($actions -join ', ')"
+    }
+    return
+}
 if (-not $GmailQuery) {
     $GmailQuery = "newer_than:${LookbackDays}d {from:delta.com from:united.com from:aa.com from:americanairlines.com subject:Delta subject:United subject:`"American Airlines`" subject:flight subject:itinerary subject:confirmation}"
 }

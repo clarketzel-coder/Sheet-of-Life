@@ -78,6 +78,12 @@ Write to Notion, label the source email, and archive it from the Inbox:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -Apply -FileProcessedEmail -ProcessedLabelName "Travel" -ArchiveProcessedEmail
 ```
 
+File already-imported source emails from local sync state:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -FileImportedEmail -FileProcessedEmail -ProcessedLabelName "Travel/Upcoming" -ArchiveProcessedEmail
+```
+
 ## Schedule Monthly
 
 Register a Windows scheduled task for the first day of each month at 8 PM:
