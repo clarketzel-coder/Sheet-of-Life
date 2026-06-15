@@ -6,7 +6,7 @@ Local scripts and artifacts for the Sheet of Life personal operating system prot
 
 - `notion_*.ps1` - Notion setup and update helpers for the Sheet of Life workspace.
 - `sol_pomodoro_*` - local Pomodoro UI/server and Notion logging helpers.
-- `sol_sync_flights_from_gmail.ps1` - Gmail-to-Notion flight/travel sync.
+- `sol_sync_flights_from_gmail.ps1` - Gmail-to-Notion travel sync with one row per flight/reservation segment.
 - `*_README.md` and `*_GUIDE.md` - operating notes for each automation area.
 
 The older standalone HTML prototype is intentionally kept local and ignored by git. This repo is focused on the Notion-backed setup and companion automations.

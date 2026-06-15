@@ -1,10 +1,12 @@
 param(
     [switch]$Apply,
     [switch]$CheckNotion,
+    [switch]$ReplayImported,
     [int]$LookbackDays = 45,
     [int]$MaxMessages = 50,
     [string]$GmailQuery = "",
     [string]$EventsDatabaseId = "37fe8e29-9eae-8113-9cc4-c88edca64657",
+    [string]$TravelDatabaseId = "380e8e29-9eae-8119-a19e-f9f743f62bff",
     [string]$NotionVersion = "2022-06-28",
     [string]$RedirectUri = "http://127.0.0.1:8788/"
 )
@@ -239,6 +241,17 @@ function Get-PlainBody {
     return $Message.snippet
 }
 
+function Get-HtmlBody {
+    param($Message)
+
+    $parts = Get-MessageParts -Part $Message.payload
+    $html = $parts | Where-Object { $_.mimeType -eq "text/html" -and $_.body.data } | Select-Object -First 1
+    if ($html) {
+        return ConvertFrom-Base64Url -Value $html.body.data
+    }
+    return ""
+}
+
 function Get-IcsAttachments {
     param($Message, [string]$AccessToken)
 
@@ -308,6 +321,301 @@ function ConvertFrom-Ics {
         }
     }
     return $events
+}
+
+function Normalize-FlightNumber {
+    param([string]$Value)
+
+    if (-not $Value) { return "" }
+    $clean = ($Value -replace "\s+", "").ToUpperInvariant()
+    if ($clean -match "^([A-Z]{2})(\d{1,4})$") {
+        return "$($Matches[1]) $($Matches[2])"
+    }
+    return $Value.Trim()
+}
+
+function Get-FlightKey {
+    param($Item)
+
+    $flight = (Normalize-FlightNumber -Value $Item.FlightNumber) -replace "\s+", ""
+    $start = "$($Item.Start)"
+    if ($start.Length -ge 16) {
+        $start = $start.Substring(0, 16)
+    }
+    return "flight|$flight|$start|$($Item.From)|$($Item.To)".ToLowerInvariant()
+}
+
+function New-FlightTravelItem {
+    param(
+        [string]$FlightNumber,
+        [string]$Provider,
+        [string]$Start,
+        [string]$End,
+        [string]$From,
+        [string]$To,
+        [string]$ConfirmationCode,
+        [string]$MessageId,
+        [string]$Subject,
+        [string]$FromEmail,
+        [string]$Notes
+    )
+
+    $normalizedFlight = Normalize-FlightNumber -Value $FlightNumber
+    $item = @{
+        Name = "$normalizedFlight $From -> $To"
+        Kind = "Flight"
+        Status = "Confirmed"
+        Start = $Start
+        End = $End
+        Provider = $Provider
+        ConfirmationCode = $ConfirmationCode
+        FlightNumber = $normalizedFlight
+        From = $From
+        To = $To
+        SourceMessageId = $MessageId
+        SourceSubject = $Subject
+        SourceFrom = $FromEmail
+        Notes = $Notes
+        Structured = $true
+    }
+    $item["UniqueKey"] = Get-FlightKey -Item $item
+    return $item
+}
+
+function Get-AirportTimeZoneId {
+    param([string]$Airport)
+
+    $map = @{
+        ATL = "Eastern Standard Time"
+        CLT = "Eastern Standard Time"
+        DCA = "Eastern Standard Time"
+        EWR = "Eastern Standard Time"
+        IAD = "Eastern Standard Time"
+        JFK = "Eastern Standard Time"
+        LGA = "Eastern Standard Time"
+        MIA = "Eastern Standard Time"
+        ROC = "Eastern Standard Time"
+        BOS = "Eastern Standard Time"
+        ORD = "Central Standard Time"
+        MDW = "Central Standard Time"
+        MSN = "Central Standard Time"
+        DFW = "Central Standard Time"
+        IAH = "Central Standard Time"
+        MCI = "Central Standard Time"
+        AUS = "Central Standard Time"
+        DEN = "Mountain Standard Time"
+        PHX = "US Mountain Standard Time"
+        LAX = "Pacific Standard Time"
+        SFO = "Pacific Standard Time"
+        SEA = "Pacific Standard Time"
+        LAS = "Pacific Standard Time"
+    }
+
+    if ($Airport -and $map.ContainsKey($Airport.ToUpperInvariant())) {
+        return $map[$Airport.ToUpperInvariant()]
+    }
+    return ""
+}
+
+function Convert-DateAndTime {
+    param([string]$Date, [string]$Time, [string]$Airport)
+
+    if (-not $Date -or -not $Time) { return "" }
+    $culture = [System.Globalization.CultureInfo]::GetCultureInfo("en-US")
+    $styles = [System.Globalization.DateTimeStyles]::None
+    $value = "$Date $Time"
+    $formats = @("MMMM d, yyyy h:mm tt", "dddd, MMMM d, yyyy h:mm tt")
+    foreach ($format in $formats) {
+        try {
+            $localDateTime = [DateTime]::ParseExact($value, $format, $culture, $styles)
+            $timeZoneId = Get-AirportTimeZoneId -Airport $Airport
+            if ($timeZoneId) {
+                $timeZone = [System.TimeZoneInfo]::FindSystemTimeZoneById($timeZoneId)
+                $offset = $timeZone.GetUtcOffset($localDateTime)
+                return ([DateTimeOffset]::new($localDateTime, $offset)).ToString("yyyy-MM-ddTHH:mm:sszzz")
+            }
+            return $localDateTime.ToString("s")
+        }
+        catch {}
+    }
+    return $value
+}
+
+function ConvertTo-PlainLines {
+    param([string]$Html)
+
+    if (-not $Html) { return @() }
+    $plain = [regex]::Replace($Html, "<(br|/p|/tr|/td|/table|/div)[^>]*>", "`n", "IgnoreCase")
+    $plain = [regex]::Replace($plain, "<[^>]+>", " ")
+    $plain = [System.Net.WebUtility]::HtmlDecode($plain)
+    $plain = [regex]::Replace($plain, "[ \t]+", " ")
+    return @($plain -split "\r?\n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Get-ConfirmationCodeFromText {
+    param([string]$Text)
+
+    if (-not $Text) { return "" }
+    if ($Text -match "(?i)\bConfirmation number:\s*([A-Z0-9]{5,8})\b") {
+        return $Matches[1].ToUpperInvariant()
+    }
+    if ($Text -match "(?i)\bRecord locator\b\s*[:#]?\s*([A-Z0-9]{5,8})\b") {
+        return $Matches[1].ToUpperInvariant()
+    }
+    return ""
+}
+
+function ConvertFrom-JsonLdFlights {
+    param(
+        [string]$Html,
+        [string]$MessageId,
+        [string]$Subject,
+        [string]$From
+    )
+
+    $items = @()
+    if (-not $Html) { return $items }
+
+    $matches = [regex]::Matches($Html, "(?is)<script[^>]+type=[""']application/ld\+json[""'][^>]*>(.*?)</script>")
+    foreach ($match in $matches) {
+        $json = [System.Net.WebUtility]::HtmlDecode($match.Groups[1].Value).Trim()
+        if ($json -notmatch "Flight|Reservation") {
+            continue
+        }
+
+        try {
+            $records = @($json | ConvertFrom-Json)
+        }
+        catch {
+            continue
+        }
+
+        foreach ($record in $records) {
+            $flights = if ($record.reservationFor) { @($record.reservationFor) } else { @($record) }
+            foreach ($flight in $flights) {
+                if ($flight.'@type' -ne "Flight") {
+                    continue
+                }
+
+                $items += New-FlightTravelItem `
+                    -FlightNumber $flight.flightNumber `
+                    -Provider $flight.airline.name `
+                    -Start $flight.departureTime `
+                    -End $flight.arrivalTime `
+                    -From $flight.departureAirport.iataCode `
+                    -To $flight.arrivalAirport.iataCode `
+                    -ConfirmationCode (Get-ConfirmationCodeFromText -Text $Html) `
+                    -MessageId $MessageId `
+                    -Subject $Subject `
+                    -FromEmail $From `
+                    -Notes "Source: Gmail travel sync`nParser: JSON-LD flight reservation`nDeparture: $($flight.departureAirport.name)`nArrival: $($flight.arrivalAirport.name)"
+            }
+        }
+    }
+    return $items
+}
+
+function ConvertFrom-UnitedHtmlFlights {
+    param(
+        [string]$Html,
+        [string]$MessageId,
+        [string]$Subject,
+        [string]$From
+    )
+
+    $items = @()
+    $lines = ConvertTo-PlainLines -Html $Html
+    if ($lines.Count -eq 0) { return $items }
+
+    $confirmationCode = Get-ConfirmationCodeFromText -Text ($lines -join "`n")
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -notmatch "^([A-Z]{2})\s?(\d{3,4})\s+operated by\s+(.+)$") {
+            continue
+        }
+
+        $flightNumber = "$($Matches[1]) $($Matches[2])"
+        $provider = $Matches[3].Trim()
+        $date = if ($i -gt 0 -and $lines[$i - 1] -match "^[A-Z][a-z]+ \d{1,2}, \d{4}$") { $lines[$i - 1] } else { "" }
+        $aircraft = if (($i + 1) -lt $lines.Count) { $lines[$i + 1] } else { "" }
+        $departTime = if (($i + 3) -lt $lines.Count) { $lines[$i + 3] } else { "" }
+        $arriveTime = if (($i + 4) -lt $lines.Count) { $lines[$i + 4] } else { "" }
+        $departAirport = if (($i + 5) -lt $lines.Count) { $lines[$i + 5] } else { "" }
+        $duration = if (($i + 6) -lt $lines.Count) { $lines[$i + 6] } else { "" }
+        $arriveAirport = if (($i + 7) -lt $lines.Count) { $lines[$i + 7] } else { "" }
+        $departCity = if (($i + 8) -lt $lines.Count) { $lines[$i + 8] } else { "" }
+        $arriveCity = if (($i + 9) -lt $lines.Count) { $lines[$i + 9] } else { "" }
+
+        if ($departAirport -notmatch "^[A-Z]{3}$" -or $arriveAirport -notmatch "^[A-Z]{3}$") {
+            continue
+        }
+
+        $start = Convert-DateAndTime -Date $date -Time $departTime -Airport $departAirport
+        $end = Convert-DateAndTime -Date $date -Time $arriveTime -Airport $arriveAirport
+        if ($start -and $end) {
+            try {
+                $startOffset = [DateTimeOffset]::Parse($start)
+                $endOffset = [DateTimeOffset]::Parse($end)
+                if ($endOffset -lt $startOffset) {
+                    $end = $endOffset.AddDays(1).ToString("yyyy-MM-ddTHH:mm:sszzz")
+                }
+            }
+            catch {}
+        }
+
+        $items += New-FlightTravelItem `
+            -FlightNumber $flightNumber `
+            -Provider $provider `
+            -Start $start `
+            -End $end `
+            -From $departAirport `
+            -To $arriveAirport `
+            -ConfirmationCode $confirmationCode `
+            -MessageId $MessageId `
+            -Subject $Subject `
+            -FromEmail $From `
+            -Notes "Source: Gmail travel sync`nParser: United itinerary HTML`nAircraft: $aircraft`nDuration: $duration`nDeparture: $departCity`nArrival: $arriveCity"
+    }
+
+    return $items
+}
+
+function ConvertFrom-TravelEmail {
+    param(
+        $Message,
+        [string]$Subject,
+        [string]$From
+    )
+
+    $html = Get-HtmlBody -Message $Message
+    $items = ConvertFrom-JsonLdFlights -Html $html -MessageId $Message.id -Subject $Subject -From $From
+    if ($items.Count -gt 0) {
+        return $items
+    }
+
+    $items = ConvertFrom-UnitedHtmlFlights -Html $html -MessageId $Message.id -Subject $Subject -From $From
+    if ($items.Count -gt 0) {
+        return $items
+    }
+
+    $fallback = ConvertFrom-FlightEmailFallback -Message $Message
+    return ,@{
+        Name = $fallback.Name
+        Kind = "Other"
+        Status = "Needs Review"
+        Start = $fallback.Start
+        End = $fallback.End
+        Provider = ""
+        ConfirmationCode = ""
+        FlightNumber = ""
+        From = ""
+        To = ""
+        SourceMessageId = $Message.id
+        SourceSubject = $Subject
+        SourceFrom = $From
+        UniqueKey = "message|$($Message.id)"
+        Notes = $fallback.Notes
+        Structured = $false
+    }
 }
 
 function ConvertFrom-FlightEmailFallback {
@@ -391,37 +699,45 @@ function Invoke-NotionApi {
     return Invoke-RestMethod @parameters
 }
 
-function Test-NotionEventsDatabase {
+function Test-NotionTravelDatabase {
     param([string]$NotionToken)
 
-    $database = Invoke-NotionApi -Method "GET" -Path "/databases/$EventsDatabaseId" -NotionToken $NotionToken
-    $requiredProperties = @("Name", "Date", "End Date", "Category", "Type", "Notes")
+    $database = Invoke-NotionApi -Method "GET" -Path "/databases/$TravelDatabaseId" -NotionToken $NotionToken
+    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Source Message ID", "Source Subject", "Unique Key", "Notes")
     $missingProperties = @($requiredProperties | Where-Object { -not $database.properties.PSObject.Properties.Name.Contains($_) })
 
     if ($missingProperties.Count -gt 0) {
-        throw "Events & Trips database is reachable, but missing expected propert$(if ($missingProperties.Count -eq 1) { 'y' } else { 'ies' }): $($missingProperties -join ', ')"
+        throw "Travel database is reachable, but missing expected propert$(if ($missingProperties.Count -eq 1) { 'y' } else { 'ies' }): $($missingProperties -join ', ')"
     }
 
-    Write-Host "Notion preflight OK: Events & Trips database is reachable and has the expected travel fields."
+    Write-Host "Notion preflight OK: Travel database is reachable and has the expected reservation fields."
 }
 
-function Add-EventTrip {
-    param($Trip, [string]$NotionToken)
+function Add-TravelItem {
+    param($Item, [string]$NotionToken)
 
     $properties = @{
-        Name = TitleValue $Trip.Name
-        Date = DateValue $Trip.Start
-        Category = SelectValue "Flight"
-        Type = SelectValue "Trip"
-        Notes = TextValue $Trip.Notes
+        Name = TitleValue $Item.Name
+        Kind = SelectValue $Item.Kind
+        Status = SelectValue $Item.Status
+        Start = DateValue $Item.Start
+        Provider = TextValue $Item.Provider
+        "Confirmation Code" = TextValue $Item.ConfirmationCode
+        "Flight Number" = TextValue $Item.FlightNumber
+        From = TextValue $Item.From
+        To = TextValue $Item.To
+        "Source Message ID" = TextValue $Item.SourceMessageId
+        "Source Subject" = TextValue $Item.SourceSubject
+        "Unique Key" = TextValue $Item.UniqueKey
+        Notes = TextValue $Item.Notes
     }
 
-    if ($Trip.End) {
-        $properties["End Date"] = DateValue $Trip.End
+    if ($Item.End) {
+        $properties["End"] = DateValue $Item.End
     }
 
     $body = @{
-        parent = @{ database_id = $EventsDatabaseId }
+        parent = @{ database_id = $TravelDatabaseId }
         properties = $properties
     }
 
@@ -437,7 +753,7 @@ if (($Apply -or $CheckNotion) -and -not $notionToken) {
 }
 
 if ($CheckNotion) {
-    Test-NotionEventsDatabase -NotionToken $notionToken
+    Test-NotionTravelDatabase -NotionToken $notionToken
     if (-not $Apply) {
         return
     }
@@ -446,6 +762,7 @@ if ($CheckNotion) {
 $accessToken = Get-GmailAccessToken
 $state = Load-State
 $imported = @($state.importedMessageIds)
+$importedSegmentKeys = if ($state.PSObject.Properties.Name.Contains("importedSegmentKeys")) { @($state.importedSegmentKeys) } else { @() }
 if (-not $GmailQuery) {
     $GmailQuery = "newer_than:${LookbackDays}d {from:delta.com from:united.com from:aa.com from:americanairlines.com subject:Delta subject:United subject:`"American Airlines`" subject:flight subject:itinerary subject:confirmation}"
 }
@@ -454,34 +771,33 @@ $encodedQuery = [uri]::EscapeDataString($query)
 $messageList = Invoke-GmailApi -AccessToken $accessToken -Path "/users/me/messages?q=$encodedQuery&maxResults=$MaxMessages"
 $messages = @($messageList.messages)
 $candidates = @()
+$seenSegmentKeys = @{}
 
 foreach ($item in $messages) {
-    if ($imported -contains $item.id) {
+    if ((-not $ReplayImported) -and ($imported -contains $item.id)) {
         continue
     }
 
     $message = Invoke-GmailApi -AccessToken $accessToken -Path "/users/me/messages/$($item.id)?format=full"
     $subject = Get-MessageHeader -Message $message -Name "Subject"
     $from = Get-MessageHeader -Message $message -Name "From"
-    $icsAttachments = Get-IcsAttachments -Message $message -AccessToken $accessToken
-    $trips = @()
+    $travelItems = @(ConvertFrom-TravelEmail -Message $message -Subject $subject -From $from)
 
-    foreach ($ics in $icsAttachments) {
-        $trips += ConvertFrom-Ics -Ics $ics -MessageId $message.id -Subject $subject -From $from
-    }
+    foreach ($travelItem in $travelItems) {
+        $key = $travelItem["UniqueKey"]
+        if ($key -and (($importedSegmentKeys -contains $key) -or $seenSegmentKeys.ContainsKey($key))) {
+            continue
+        }
 
-    if ($trips.Count -eq 0) {
-        $trips += ConvertFrom-FlightEmailFallback -Message $message
-    }
-
-    foreach ($trip in $trips) {
-        $trip["MessageId"] = $message.id
-        $candidates += $trip
+        if ($key) {
+            $seenSegmentKeys[$key] = $true
+        }
+        $candidates += $travelItem
     }
 }
 
 if ($candidates.Count -eq 0) {
-    Write-Host "No new flight email candidates found."
+    Write-Host "No new travel email candidates found."
     return
 }
 
@@ -490,23 +806,36 @@ if (-not $Apply) {
     $candidates | ForEach-Object {
         [pscustomobject]@{
             Name = $_["Name"]
+            Kind = $_["Kind"]
             Start = $_["Start"]
             End = $_["End"]
+            From = $_["From"]
+            To = $_["To"]
             Structured = $_["Structured"]
-            MessageId = $_["MessageId"]
+            MessageId = $_["SourceMessageId"]
         }
     } | Format-Table -AutoSize
     return
 }
 
 $writtenMessageIds = @()
+$writtenSegmentKeys = @()
 foreach ($candidate in $candidates) {
-    [void](Add-EventTrip -Trip $candidate -NotionToken $notionToken)
-    $writtenMessageIds += $candidate.MessageId
+    [void](Add-TravelItem -Item $candidate -NotionToken $notionToken)
+    $writtenMessageIds += $candidate.SourceMessageId
+    if ($candidate.UniqueKey) {
+        $writtenSegmentKeys += $candidate.UniqueKey
+    }
     Write-Host "Added: $($candidate.Name)"
 }
 
 $state.importedMessageIds = @($imported + $writtenMessageIds | Select-Object -Unique)
+if ($state.PSObject.Properties.Name.Contains("importedSegmentKeys")) {
+    $state.importedSegmentKeys = @($importedSegmentKeys + $writtenSegmentKeys | Select-Object -Unique)
+}
+else {
+    $state | Add-Member -MemberType NoteProperty -Name "importedSegmentKeys" -Value @($importedSegmentKeys + $writtenSegmentKeys | Select-Object -Unique)
+}
 if ($state.PSObject.Properties.Name.Contains("lastRun")) {
     $state.lastRun = (Get-Date).ToString("o")
 }
@@ -514,4 +843,4 @@ else {
     $state | Add-Member -MemberType NoteProperty -Name "lastRun" -Value (Get-Date).ToString("o")
 }
 Save-State -State $state
-Write-Host "Imported $($candidates.Count) trip event(s)."
+Write-Host "Imported $($candidates.Count) travel reservation row(s)."

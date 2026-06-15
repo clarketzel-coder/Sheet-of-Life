@@ -76,6 +76,7 @@ Running Log:     37fe8e29-9eae-810f-b650-eec94ba5d8e6
 Learning Log:    37fe8e29-9eae-816d-a682-e5ecf84db554
 Events & Trips:  37fe8e29-9eae-8113-9cc4-c88edca64657
 Weekly Review:   37fe8e29-9eae-8147-a043-fe457f112456
+Travel:          380e8e29-9eae-8119-a19e-f9f743f62bff
 ```
 
 If the to-do hub has been created, add its ID here:
@@ -215,6 +216,25 @@ Use `POST /v1/pages` to create database rows by setting:
 - `End Date` date
 - `Category` select
 - `Type` select: Event, Trip, Appointment, Birthday
+- `Notes` rich text
+
+### Travel
+
+Dedicated travel reservation database. Use this instead of Events & Trips for flights, hotels, rental cars, trains, and other travel segments.
+
+- `Name` title
+- `Kind` select: Flight, Hotel, Car, Train, Other
+- `Status` select: Confirmed, Needs Review, Canceled
+- `Start` date
+- `End` date
+- `Provider` rich text
+- `Confirmation Code` rich text
+- `Flight Number` rich text
+- `From` rich text
+- `To` rich text
+- `Source Message ID` rich text
+- `Source Subject` rich text
+- `Unique Key` rich text
 - `Notes` rich text
 
 ### Weekly Review

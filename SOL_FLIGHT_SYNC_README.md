@@ -1,15 +1,15 @@
-# SoL Flight Sync
+# SoL Travel Sync
 
-Monthly Gmail-to-SoL flight email sync.
+Monthly Gmail-to-SoL travel email sync.
 
 ## What It Does
 
 - Reads Gmail with the readonly Gmail API scope.
 - Searches recent airline/travel emails from Delta, United, American, and flight-related subjects.
-- Prefers `.ics` calendar attachments for structured flight/trip times.
-- Falls back to a review-needed trip record when no `.ics` attachment is found.
-- Adds records to the existing SoL `Events & Trips` database.
-- Deduplicates by Gmail message ID in `.sol_flight_sync_state.json`.
+- Parses American Airlines JSON-LD flight reservations and United itinerary HTML flight blocks.
+- Creates one row per concrete travel reservation segment in the SoL `Travel` database.
+- Falls back to a review-needed travel record when no segment parser matches.
+- Deduplicates by travel segment key and Gmail message ID in `.sol_flight_sync_state.json`.
 
 ## Local Secrets
 
@@ -34,7 +34,7 @@ https://www.googleapis.com/auth/gmail.readonly
 
 ## First Run
 
-Verify the Notion connection and target database:
+Verify the Notion connection and target Travel database:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -CheckNotion
