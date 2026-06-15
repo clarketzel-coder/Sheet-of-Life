@@ -184,7 +184,25 @@ function Invoke-GmailApi {
     )
 
     $headers = @{ Authorization = "Bearer $AccessToken" }
-    return Invoke-RestMethod -Method "GET" -Uri "https://gmail.googleapis.com/gmail/v1$Path" -Headers $headers
+    try {
+        return Invoke-RestMethod -Method "GET" -Uri "https://gmail.googleapis.com/gmail/v1$Path" -Headers $headers
+    }
+    catch {
+        $details = ""
+        if ($_.Exception.Response) {
+            $stream = $_.Exception.Response.GetResponseStream()
+            if ($stream) {
+                $reader = [System.IO.StreamReader]::new($stream)
+                $details = $reader.ReadToEnd()
+                $reader.Close()
+            }
+        }
+
+        if ($details) {
+            throw "Gmail API request failed: $details"
+        }
+        throw
+    }
 }
 
 function Get-MessageHeader {
@@ -469,7 +487,15 @@ if ($candidates.Count -eq 0) {
 
 if (-not $Apply) {
     Write-Host "Dry run. Re-run with -Apply to write to Notion and update local state."
-    $candidates | Select-Object Name, Start, End, Structured, MessageId | Format-Table -AutoSize
+    $candidates | ForEach-Object {
+        [pscustomobject]@{
+            Name = $_["Name"]
+            Start = $_["Start"]
+            End = $_["End"]
+            Structured = $_["Structured"]
+            MessageId = $_["MessageId"]
+        }
+    } | Format-Table -AutoSize
     return
 }
 
@@ -481,6 +507,11 @@ foreach ($candidate in $candidates) {
 }
 
 $state.importedMessageIds = @($imported + $writtenMessageIds | Select-Object -Unique)
-$state.lastRun = (Get-Date).ToString("o")
+if ($state.PSObject.Properties.Name.Contains("lastRun")) {
+    $state.lastRun = (Get-Date).ToString("o")
+}
+else {
+    $state | Add-Member -MemberType NoteProperty -Name "lastRun" -Value (Get-Date).ToString("o")
+}
 Save-State -State $state
 Write-Host "Imported $($candidates.Count) trip event(s)."
