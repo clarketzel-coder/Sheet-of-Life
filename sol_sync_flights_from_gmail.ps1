@@ -2,6 +2,7 @@ param(
     [switch]$Apply,
     [switch]$CheckNotion,
     [switch]$ReplayImported,
+    [switch]$ReviewTravelEmail,
     [int]$LookbackDays = 45,
     [int]$MaxMessages = 50,
     [string]$GmailQuery = "",
@@ -446,6 +447,23 @@ function Get-FlightKey {
     return "flight|$flight|$start|$($Item.From)|$($Item.To)".ToLowerInvariant()
 }
 
+function Get-TravelKey {
+    param($Item)
+
+    $kind = "$($Item.Kind)".ToLowerInvariant()
+    $provider = ("$($Item.Provider)" -replace "\s+", "").ToLowerInvariant()
+    $confirmation = ("$($Item.ConfirmationCode)" -replace "\s+", "").ToLowerInvariant()
+    $start = "$($Item.Start)"
+    if ($start.Length -ge 16) {
+        $start = $start.Substring(0, 16)
+    }
+
+    if ($confirmation) {
+        return "$kind|$provider|$confirmation|$start"
+    }
+    return "$kind|$provider|$start|$($Item.Location)|$($Item.From)|$($Item.To)".ToLowerInvariant()
+}
+
 function New-FlightTravelItem {
     param(
         [string]$FlightNumber,
@@ -476,6 +494,8 @@ function New-FlightTravelItem {
         FlightNumber = $normalizedFlight
         From = $From
         To = $To
+        Location = ""
+        Address = ""
         SourceMessageId = $MessageId
         SourceSubject = $Subject
         SourceFrom = $FromEmail
@@ -483,6 +503,49 @@ function New-FlightTravelItem {
         Structured = $true
     }
     $item["UniqueKey"] = Get-FlightKey -Item $item
+    return $item
+}
+
+function New-TravelReservationItem {
+    param(
+        [string]$Kind,
+        [string]$Name,
+        [string]$Provider,
+        [string]$Start,
+        [string]$End,
+        [string]$ConfirmationCode,
+        [string]$Location,
+        [string]$Address,
+        [string]$FromLocation,
+        [string]$ToLocation,
+        [string]$MessageId,
+        [string]$Subject,
+        [string]$FromEmail,
+        [string]$Notes,
+        [string]$Status = "Confirmed",
+        [bool]$Structured = $true
+    )
+
+    $item = @{
+        Name = $Name
+        Kind = $Kind
+        Status = $Status
+        Start = $Start
+        End = $End
+        Provider = $Provider
+        ConfirmationCode = $ConfirmationCode
+        FlightNumber = ""
+        From = $FromLocation
+        To = $ToLocation
+        Location = $Location
+        Address = $Address
+        SourceMessageId = $MessageId
+        SourceSubject = $Subject
+        SourceFrom = $FromEmail
+        Notes = $Notes
+        Structured = $Structured
+    }
+    $item["UniqueKey"] = Get-TravelKey -Item $item
     return $item
 }
 
@@ -604,6 +667,33 @@ function Get-ConfirmationCodeFromText {
     return ""
 }
 
+function Get-ObjectPropertyValue {
+    param($Object, [string[]]$Names)
+
+    if (-not $Object) { return "" }
+    foreach ($name in $Names) {
+        $property = $Object.PSObject.Properties[$name]
+        if ($property -and $null -ne $property.Value) {
+            return $property.Value
+        }
+    }
+    return ""
+}
+
+function ConvertTo-AddressText {
+    param($Address)
+
+    if (-not $Address) { return "" }
+    if ($Address -is [string]) { return $Address }
+
+    $parts = @()
+    foreach ($name in @("streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry")) {
+        $value = Get-ObjectPropertyValue -Object $Address -Names @($name)
+        if ($value) { $parts += "$value" }
+    }
+    return ($parts -join ", ")
+}
+
 function ConvertFrom-JsonLdFlights {
     param(
         [string]$Html,
@@ -651,6 +741,95 @@ function ConvertFrom-JsonLdFlights {
             }
         }
     }
+    return $items
+}
+
+function ConvertFrom-JsonLdOtherReservations {
+    param(
+        [string]$Html,
+        [string]$MessageId,
+        [string]$Subject,
+        [string]$From
+    )
+
+    $items = @()
+    if (-not $Html) { return $items }
+
+    $matches = [regex]::Matches($Html, "(?is)<script[^>]+type=[""']application/ld\+json[""'][^>]*>(.*?)</script>")
+    foreach ($match in $matches) {
+        $json = [System.Net.WebUtility]::HtmlDecode($match.Groups[1].Value).Trim()
+        if ($json -notmatch "Reservation|Lodging|Hotel|RentalCar|AutoRental") {
+            continue
+        }
+
+        try {
+            $records = @($json | ConvertFrom-Json)
+        }
+        catch {
+            continue
+        }
+
+        foreach ($record in $records) {
+            $recordType = "$(Get-ObjectPropertyValue -Object $record -Names @('@type'))"
+            $reservationFor = Get-ObjectPropertyValue -Object $record -Names @("reservationFor", "underName")
+            $reservationForType = "$(Get-ObjectPropertyValue -Object $reservationFor -Names @('@type'))"
+            $confirmation = "$(Get-ObjectPropertyValue -Object $record -Names @("reservationNumber", "confirmationNumber", "orderNumber"))"
+
+            if ($recordType -match "LodgingReservation|HotelReservation" -or $reservationForType -match "Hotel|LodgingBusiness|Accommodation") {
+                $provider = "$(Get-ObjectPropertyValue -Object $reservationFor -Names @("name"))"
+                if (-not $provider) { $provider = "Hotel" }
+                $start = "$(Get-ObjectPropertyValue -Object $record -Names @("checkinTime", "checkInTime", "checkinDate", "checkInDate", "startTime"))"
+                $end = "$(Get-ObjectPropertyValue -Object $record -Names @("checkoutTime", "checkOutTime", "checkoutDate", "checkOutDate", "endTime"))"
+                $address = ConvertTo-AddressText -Address (Get-ObjectPropertyValue -Object $reservationFor -Names @("address"))
+                $location = $provider
+
+                $items += New-TravelReservationItem `
+                    -Kind "Hotel" `
+                    -Name "Hotel stay: $provider" `
+                    -Provider $provider `
+                    -Start $start `
+                    -End $end `
+                    -ConfirmationCode $confirmation `
+                    -Location $location `
+                    -Address $address `
+                    -FromLocation "" `
+                    -ToLocation "" `
+                    -MessageId $MessageId `
+                    -Subject $Subject `
+                    -FromEmail $From `
+                    -Notes "Source: Gmail travel sync`nParser: JSON-LD lodging reservation"
+            }
+            elseif ($recordType -match "RentalCarReservation" -or $reservationForType -match "RentalCar|Car|AutoRental") {
+                $provider = "$(Get-ObjectPropertyValue -Object $reservationFor -Names @("name"))"
+                if (-not $provider) { $provider = "Rental car" }
+                $pickup = Get-ObjectPropertyValue -Object $record -Names @("pickupLocation", "pickUpLocation")
+                $dropoff = Get-ObjectPropertyValue -Object $record -Names @("dropoffLocation", "dropOffLocation")
+                $pickupName = "$(Get-ObjectPropertyValue -Object $pickup -Names @("name"))"
+                $dropoffName = "$(Get-ObjectPropertyValue -Object $dropoff -Names @("name"))"
+                $start = "$(Get-ObjectPropertyValue -Object $record -Names @("pickupTime", "pickUpTime", "startTime"))"
+                $end = "$(Get-ObjectPropertyValue -Object $record -Names @("dropoffTime", "dropOffTime", "endTime"))"
+                $location = if ($pickupName) { $pickupName } else { $provider }
+                $address = ConvertTo-AddressText -Address (Get-ObjectPropertyValue -Object $pickup -Names @("address"))
+
+                $items += New-TravelReservationItem `
+                    -Kind "Car" `
+                    -Name "Rental car: $provider" `
+                    -Provider $provider `
+                    -Start $start `
+                    -End $end `
+                    -ConfirmationCode $confirmation `
+                    -Location $location `
+                    -Address $address `
+                    -FromLocation $pickupName `
+                    -ToLocation $dropoffName `
+                    -MessageId $MessageId `
+                    -Subject $Subject `
+                    -FromEmail $From `
+                    -Notes "Source: Gmail travel sync`nParser: JSON-LD rental car reservation"
+            }
+        }
+    }
+
     return $items
 }
 
@@ -731,7 +910,17 @@ function ConvertFrom-TravelEmail {
         return $items
     }
 
+    $items = ConvertFrom-JsonLdOtherReservations -Html $html -MessageId $Message.id -Subject $Subject -From $From
+    if ($items.Count -gt 0) {
+        return $items
+    }
+
     $items = ConvertFrom-UnitedHtmlFlights -Html $html -MessageId $Message.id -Subject $Subject -From $From
+    if ($items.Count -gt 0) {
+        return $items
+    }
+
+    $items = ConvertFrom-TravelEmailHeuristic -Message $Message -Subject $Subject -From $From
     if ($items.Count -gt 0) {
         return $items
     }
@@ -748,6 +937,8 @@ function ConvertFrom-TravelEmail {
         FlightNumber = ""
         From = ""
         To = ""
+        Location = ""
+        Address = ""
         SourceMessageId = $Message.id
         SourceSubject = $Subject
         SourceFrom = $From
@@ -755,6 +946,60 @@ function ConvertFrom-TravelEmail {
         Notes = $fallback.Notes
         Structured = $false
     }
+}
+
+function ConvertFrom-TravelEmailHeuristic {
+    param($Message, [string]$Subject, [string]$From)
+
+    $body = Get-PlainBody -Message $Message
+    $html = Get-HtmlBody -Message $Message
+    $text = "$From`n$Subject`n$($Message.snippet)`n$body`n$([System.Net.WebUtility]::HtmlDecode(([regex]::Replace($html, '<[^>]+>', ' '))))"
+    $date = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$Message.internalDate).LocalDateTime.ToString("yyyy-MM-dd")
+    $confirmation = Get-ConfirmationCodeFromText -Text $text
+
+    if ($text -match "(?i)\b(Marriott|Bonvoy|Hilton|Hampton Inn|DoubleTree|Embassy Suites|Homewood Suites|Hyatt|IHG|Holiday Inn|hotel|check[\s-]?in|check[\s-]?out)\b") {
+        $provider = if ($text -match "(?i)\b(Marriott|Bonvoy)\b") { "Marriott" } elseif ($text -match "(?i)\b(Hilton|Hampton Inn|DoubleTree|Embassy Suites|Homewood Suites)\b") { "Hilton" } elseif ($text -match "(?i)\b(Hyatt)\b") { "Hyatt" } elseif ($text -match "(?i)\b(IHG|Holiday Inn)\b") { "IHG" } else { "Hotel" }
+        return ,(New-TravelReservationItem `
+            -Kind "Hotel" `
+            -Name "Hotel reservation: $provider" `
+            -Provider $provider `
+            -Start $date `
+            -End "" `
+            -ConfirmationCode $confirmation `
+            -Location "" `
+            -Address "" `
+            -FromLocation "" `
+            -ToLocation "" `
+            -MessageId $Message.id `
+            -Subject $Subject `
+            -FromEmail $From `
+            -Notes "Needs review: hotel-like email found, but no structured lodging reservation was parsed.`nSource: Gmail travel sync`nFrom: $From`nSubject: $Subject`nSnippet: $($Message.snippet)" `
+            -Status "Needs Review" `
+            -Structured $false)
+    }
+
+    if ($text -match "(?i)\b(National|Enterprise|Alamo|Hertz|Avis|Budget|rental car|car rental|pickup|pick-up|return location)\b") {
+        $provider = if ($text -match "(?i)\bNational\b") { "National" } elseif ($text -match "(?i)\bEnterprise\b") { "Enterprise" } elseif ($text -match "(?i)\bAlamo\b") { "Alamo" } elseif ($text -match "(?i)\bHertz\b") { "Hertz" } elseif ($text -match "(?i)\bAvis\b") { "Avis" } elseif ($text -match "(?i)\bBudget\b") { "Budget" } else { "Rental car" }
+        return ,(New-TravelReservationItem `
+            -Kind "Car" `
+            -Name "Rental car reservation: $provider" `
+            -Provider $provider `
+            -Start $date `
+            -End "" `
+            -ConfirmationCode $confirmation `
+            -Location "" `
+            -Address "" `
+            -FromLocation "" `
+            -ToLocation "" `
+            -MessageId $Message.id `
+            -Subject $Subject `
+            -FromEmail $From `
+            -Notes "Needs review: rental-car-like email found, but no structured rental car reservation was parsed.`nSource: Gmail travel sync`nFrom: $From`nSubject: $Subject`nSnippet: $($Message.snippet)" `
+            -Status "Needs Review" `
+            -Structured $false)
+    }
+
+    return @()
 }
 
 function ConvertFrom-FlightEmailFallback {
@@ -859,7 +1104,7 @@ function Test-NotionTravelDatabase {
     param([string]$NotionToken)
 
     $database = Invoke-NotionApi -Method "GET" -Path "/databases/$TravelDatabaseId" -NotionToken $NotionToken
-    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Source Message ID", "Source Subject", "Unique Key", "Notes")
+    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Location", "Address", "Source Message ID", "Source Subject", "Unique Key", "Notes")
     $missingProperties = @($requiredProperties | Where-Object { -not $database.properties.PSObject.Properties.Name.Contains($_) })
 
     if ($missingProperties.Count -gt 0) {
@@ -882,6 +1127,8 @@ function Add-TravelItem {
         "Flight Number" = TextValue $Item.FlightNumber
         From = TextValue $Item.From
         To = TextValue $Item.To
+        Location = TextValue $Item.Location
+        Address = TextValue $Item.Address
         "Source Message ID" = TextValue $Item.SourceMessageId
         "Source Subject" = TextValue $Item.SourceSubject
         "Unique Key" = TextValue $Item.UniqueKey
@@ -940,7 +1187,7 @@ if ($FileImportedEmail) {
     return
 }
 if (-not $GmailQuery) {
-    $GmailQuery = "newer_than:${LookbackDays}d {from:delta.com from:united.com from:aa.com from:americanairlines.com subject:Delta subject:United subject:`"American Airlines`" subject:flight subject:itinerary subject:confirmation}"
+    $GmailQuery = "newer_than:${LookbackDays}d {from:delta.com from:united.com from:aa.com from:americanairlines.com from:marriott.com from:hilton.com from:nationalcar.com from:enterprise.com subject:Delta subject:United subject:`"American Airlines`" subject:Marriott subject:Hilton subject:National subject:Enterprise subject:flight subject:itinerary subject:confirmation subject:reservation subject:hotel subject:`"rental car`"}"
 }
 $query = $GmailQuery
 $encodedQuery = [uri]::EscapeDataString($query)
@@ -960,6 +1207,11 @@ foreach ($item in $messages) {
     $travelItems = @(ConvertFrom-TravelEmail -Message $message -Subject $subject -From $from)
 
     foreach ($travelItem in $travelItems) {
+        if ($ReviewTravelEmail) {
+            $candidates += $travelItem
+            continue
+        }
+
         $key = $travelItem["UniqueKey"]
         if ($key -and (($importedSegmentKeys -contains $key) -or $seenSegmentKeys.ContainsKey($key))) {
             continue
@@ -974,6 +1226,26 @@ foreach ($item in $messages) {
 
 if ($candidates.Count -eq 0) {
     Write-Host "No new travel email candidates found."
+    return
+}
+
+if ($ReviewTravelEmail) {
+    Write-Host "Review mode. No Notion writes, Gmail labels, or local state updates will be made."
+    $candidates | ForEach-Object {
+        [pscustomobject]@{
+            Kind = $_["Kind"]
+            Status = $_["Status"]
+            Name = $_["Name"]
+            Provider = $_["Provider"]
+            Start = $_["Start"]
+            End = $_["End"]
+            Confirmation = $_["ConfirmationCode"]
+            Location = $_["Location"]
+            Address = $_["Address"]
+            Structured = $_["Structured"]
+            MessageId = $_["SourceMessageId"]
+        }
+    } | Format-List
     return
 }
 

@@ -5,8 +5,10 @@ Monthly Gmail-to-SoL travel email sync.
 ## What It Does
 
 - Reads Gmail with the readonly Gmail API scope.
-- Searches recent airline/travel emails from Delta, United, American, and flight-related subjects.
+- Searches recent airline/travel emails from airlines, hotels, and rental car providers.
 - Parses American Airlines JSON-LD flight reservations and United itinerary HTML flight blocks.
+- Parses JSON-LD lodging and rental car reservations when vendors provide structured data.
+- Classifies Marriott/Hilton-style hotel emails and National/Enterprise-style rental car emails for review when structured data is missing.
 - Creates one row per concrete travel reservation segment in the SoL `Travel` database.
 - Falls back to a review-needed travel record when no segment parser matches.
 - Deduplicates by travel segment key and Gmail message ID in `.sol_flight_sync_state.json`.
@@ -52,6 +54,12 @@ Dry run:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1
+```
+
+Review recent travel-like emails without writing to Notion or filing Gmail:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -ReviewTravelEmail
 ```
 
 Dry run against a Gmail label:

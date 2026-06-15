@@ -232,6 +232,8 @@ Dedicated travel reservation database. Use this instead of Events & Trips for fl
 - `Flight Number` rich text
 - `From` rich text
 - `To` rich text
+- `Location` rich text
+- `Address` rich text
 - `Source Message ID` rich text
 - `Source Subject` rich text
 - `Unique Key` rich text
