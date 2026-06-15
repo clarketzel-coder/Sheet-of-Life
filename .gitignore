@@ -1,0 +1,10 @@
+.env
+*.log
+Super-Productivity-Setup-*.exe
+sheet_of_life_v*.html
+generate_routine_pdf.py
+daily_routine_simple.pdf
+morning_and_bedtime_routine.pdf
+.sol_google_token.json
+.sol_flight_sync_state.json
+google_oauth_client.json

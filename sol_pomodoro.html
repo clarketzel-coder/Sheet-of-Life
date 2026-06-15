@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoL Pomodoro</title>
+  <style>
+    :root {
+      --bg: #f7f5f0;
+      --panel: #ffffff;
+      --ink: #20201f;
+      --muted: #686560;
+      --line: #ddd8ce;
+      --accent: #2f6f6d;
+      --accent-strong: #1f5351;
+      --warm: #b75532;
+      --good: #357947;
+      --shadow: 0 16px 45px rgba(32, 32, 31, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        linear-gradient(140deg, rgba(47, 111, 109, 0.12), transparent 34%),
+        linear-gradient(30deg, rgba(183, 85, 50, 0.12), transparent 38%),
+        var(--bg);
+    }
+
+    main {
+      width: min(1040px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 36px 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    section,
+    aside {
+      background: rgba(255, 255, 255, 0.88);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .timer {
+      padding: 28px;
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .status-pill {
+      min-width: 120px;
+      text-align: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--accent-strong);
+      background: #f3faf8;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .clock {
+      display: grid;
+      place-items: center;
+      width: min(380px, 100%);
+      aspect-ratio: 1;
+      margin: 12px auto 26px;
+      border: 10px solid #e2edea;
+      border-radius: 50%;
+      background: var(--panel);
+      box-shadow: inset 0 0 0 1px var(--line);
+    }
+
+    .time {
+      font-variant-numeric: tabular-nums;
+      font-size: clamp(56px, 10vw, 86px);
+      font-weight: 820;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .controls,
+    .mode-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--ink);
+      min-height: 42px;
+      padding: 0 16px;
+      font-weight: 720;
+      cursor: pointer;
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    button.warn {
+      color: white;
+      background: var(--warm);
+      border-color: var(--warm);
+    }
+
+    button:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+    }
+
+    .mode-row {
+      margin-top: 16px;
+    }
+
+    .mode-row button {
+      min-width: 108px;
+    }
+
+    .mode-row button.active {
+      border-color: var(--accent);
+      color: var(--accent-strong);
+      background: #ecf6f4;
+    }
+
+    aside {
+      padding: 22px;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+      margin-bottom: 16px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 11px 12px;
+      min-height: 42px;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 86px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .category-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+    }
+
+    .hint,
+    .result {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .result {
+      min-height: 38px;
+      padding-top: 8px;
+    }
+
+    .ok {
+      color: var(--good);
+      font-weight: 720;
+    }
+
+    .bad {
+      color: var(--warm);
+      font-weight: 720;
+    }
+
+    @media (max-width: 820px) {
+      main {
+        grid-template-columns: 1fr;
+        padding-top: 18px;
+      }
+
+      .timer {
+        padding: 20px;
+      }
+    }
+
+    body.compact main {
+      width: calc(100% - 20px);
+      padding: 10px 0;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    body.compact .timer,
+    body.compact aside {
+      padding: 14px;
+      box-shadow: 0 8px 22px rgba(32, 32, 31, 0.12);
+    }
+
+    body.compact .meta {
+      margin-bottom: 10px;
+    }
+
+    body.compact h1 {
+      font-size: 18px;
+    }
+
+    body.compact .status-pill {
+      min-width: 92px;
+      padding: 6px 9px;
+    }
+
+    body.compact .clock {
+      width: min(220px, 100%);
+      border-width: 7px;
+      margin: 8px auto 14px;
+    }
+
+    body.compact .time {
+      font-size: 54px;
+    }
+
+    body.compact button {
+      min-height: 36px;
+      padding: 0 11px;
+      font-size: 13px;
+    }
+
+    body.compact .mode-row {
+      margin-top: 10px;
+    }
+
+    body.compact .mode-row button {
+      min-width: 94px;
+    }
+
+    body.compact .field {
+      margin-bottom: 10px;
+      gap: 5px;
+    }
+
+    body.compact label,
+    body.compact .hint,
+    body.compact .result {
+      font-size: 12px;
+    }
+
+    body.compact input,
+    body.compact select,
+    body.compact textarea {
+      min-height: 36px;
+      padding: 8px 9px;
+      font-size: 13px;
+    }
+
+    body.compact textarea {
+      min-height: 58px;
+    }
+
+    body.compact .grid {
+      gap: 7px;
+    }
+
+    body.compact .category-row {
+      gap: 6px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="timer" aria-label="Pomodoro timer">
+      <div class="meta">
+        <h1>SoL Pomodoro</h1>
+        <div class="status-pill" id="runState">Ready</div>
+      </div>
+
+      <div class="clock" aria-live="polite">
+        <div class="time" id="timeText">25:00</div>
+      </div>
+
+      <div class="controls">
+        <button class="primary" id="startButton" type="button">Start</button>
+        <button id="pauseButton" type="button" disabled>Pause</button>
+        <button class="warn" id="resetButton" type="button">Reset</button>
+        <button id="logButton" type="button" disabled>Log Now</button>
+      </div>
+
+      <div class="mode-row" aria-label="Timer mode">
+        <button class="active" data-mode="focus" type="button">Focus</button>
+        <button data-mode="shortBreak" type="button">Short Break</button>
+        <button data-mode="longBreak" type="button">Long Break</button>
+      </div>
+    </section>
+
+    <aside aria-label="Session settings">
+      <div class="field">
+        <label for="sessionTitle">Session</label>
+        <input id="sessionTitle" value="Learning Pomodoro" autocomplete="off">
+      </div>
+
+      <div class="field">
+        <label for="topic">Learning category</label>
+        <select id="topic">
+          <option>Loading...</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="newTopic">New category</label>
+        <div class="category-row">
+          <input id="newTopic" autocomplete="off" placeholder="Add or use category">
+          <button id="addTopicButton" type="button">Use</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field">
+          <label for="focusMinutes">Focus</label>
+          <input id="focusMinutes" type="number" min="1" max="180" value="25">
+        </div>
+        <div class="field">
+          <label for="shortMinutes">Short</label>
+          <input id="shortMinutes" type="number" min="1" max="60" value="5">
+        </div>
+        <div class="field">
+          <label for="longMinutes">Long</label>
+          <input id="longMinutes" type="number" min="1" max="90" value="15">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" placeholder="What did this session move forward?"></textarea>
+      </div>
+
+      <p class="hint">Focus sessions log to the SoL Learning Log when completed. Breaks stay local.</p>
+      <div class="result" id="resultText"></div>
+    </aside>
+  </main>
+
+  <script>
+    if (new URLSearchParams(window.location.search).get("compact") === "1") {
+      document.body.classList.add("compact");
+    }
+
+    const state = {
+      mode: "focus",
+      running: false,
+      remainingSeconds: 25 * 60,
+      plannedSeconds: 25 * 60,
+      startedAt: null,
+      tickId: null,
+      logged: false
+    };
+
+    const fields = {
+      runState: document.querySelector("#runState"),
+      timeText: document.querySelector("#timeText"),
+      startButton: document.querySelector("#startButton"),
+      pauseButton: document.querySelector("#pauseButton"),
+      resetButton: document.querySelector("#resetButton"),
+      logButton: document.querySelector("#logButton"),
+      sessionTitle: document.querySelector("#sessionTitle"),
+      topic: document.querySelector("#topic"),
+      newTopic: document.querySelector("#newTopic"),
+      addTopicButton: document.querySelector("#addTopicButton"),
+      focusMinutes: document.querySelector("#focusMinutes"),
+      shortMinutes: document.querySelector("#shortMinutes"),
+      longMinutes: document.querySelector("#longMinutes"),
+      notes: document.querySelector("#notes"),
+      resultText: document.querySelector("#resultText"),
+      modeButtons: [...document.querySelectorAll("[data-mode]")]
+    };
+
+    const durationInputs = {
+      focus: fields.focusMinutes,
+      shortBreak: fields.shortMinutes,
+      longBreak: fields.longMinutes
+    };
+
+    function getDurationSeconds(mode = state.mode) {
+      const value = Number(durationInputs[mode].value || 1);
+      return Math.max(1, Math.round(value)) * 60;
+    }
+
+    function format(seconds) {
+      const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+      const rest = Math.floor(seconds % 60).toString().padStart(2, "0");
+      return `${minutes}:${rest}`;
+    }
+
+    function today() {
+      const now = new Date();
+      const month = String(now.getMonth() + 1).padStart(2, "0");
+      const day = String(now.getDate()).padStart(2, "0");
+      return `${now.getFullYear()}-${month}-${day}`;
+    }
+
+    function saveSettings() {
+      localStorage.setItem("solPomodoro", JSON.stringify({
+        sessionTitle: fields.sessionTitle.value,
+        topic: fields.topic.value,
+        newTopic: fields.newTopic.value,
+        focusMinutes: fields.focusMinutes.value,
+        shortMinutes: fields.shortMinutes.value,
+        longMinutes: fields.longMinutes.value
+      }));
+    }
+
+    function loadSettings() {
+      const saved = JSON.parse(localStorage.getItem("solPomodoro") || "{}");
+      for (const [key, value] of Object.entries(saved)) {
+        if (fields[key] && value) fields[key].value = value;
+      }
+    }
+
+    function setTopicOptions(categories, preferredTopic) {
+      const current = preferredTopic || fields.topic.value || "Learning";
+      const names = [...new Set((categories || []).map((category) => category.name || category).filter(Boolean))];
+      if (!names.includes(current)) names.unshift(current);
+      fields.topic.innerHTML = "";
+      names.sort((a, b) => a.localeCompare(b)).forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        fields.topic.appendChild(option);
+      });
+      fields.topic.value = current;
+    }
+
+    async function loadCategories() {
+      const saved = JSON.parse(localStorage.getItem("solPomodoro") || "{}");
+      try {
+        const response = await fetch("/api/categories");
+        const body = await response.json();
+        if (!response.ok || !body.ok) throw new Error(body.error || "Could not load categories.");
+        setTopicOptions(body.categories, saved.topic);
+        fields.resultText.innerHTML = "";
+      } catch (error) {
+        setTopicOptions(["Learning"], saved.topic || "Learning");
+        fields.resultText.innerHTML = `<span class="bad">${error.message}</span>`;
+      }
+      saveSettings();
+    }
+
+    function useNewTopic() {
+      const name = fields.newTopic.value.trim();
+      if (!name) return;
+      setTopicOptions([...fields.topic.options].map((option) => option.value).concat(name), name);
+      fields.newTopic.value = "";
+      fields.resultText.textContent = `Using category: ${name}`;
+      fields.resultText.className = "result ok";
+      saveSettings();
+      render();
+    }
+
+    function render() {
+      fields.timeText.textContent = format(state.remainingSeconds);
+      fields.runState.textContent = state.running ? "Running" : state.logged ? "Logged" : "Ready";
+      fields.startButton.textContent = state.running ? "Running" : "Start";
+      fields.startButton.disabled = state.running;
+      fields.pauseButton.disabled = !state.running;
+      fields.logButton.disabled = state.mode !== "focus" || state.logged || state.remainingSeconds === state.plannedSeconds;
+      fields.modeButtons.forEach((button) => button.classList.toggle("active", button.dataset.mode === state.mode));
+      document.title = `${format(state.remainingSeconds)} - SoL Pomodoro`;
+    }
+
+    function resetTimer() {
+      clearInterval(state.tickId);
+      state.running = false;
+      state.plannedSeconds = getDurationSeconds();
+      state.remainingSeconds = state.plannedSeconds;
+      state.startedAt = null;
+      state.logged = false;
+      fields.resultText.textContent = "";
+      render();
+    }
+
+    function setMode(mode) {
+      if (state.running) return;
+      state.mode = mode;
+      resetTimer();
+    }
+
+    function startTimer() {
+      saveSettings();
+      if (!state.startedAt) state.startedAt = new Date();
+      state.running = true;
+      fields.resultText.textContent = "";
+      state.tickId = setInterval(tick, 1000);
+      render();
+    }
+
+    function pauseTimer() {
+      clearInterval(state.tickId);
+      state.running = false;
+      render();
+    }
+
+    async function tick() {
+      state.remainingSeconds -= 1;
+      if (state.remainingSeconds <= 0) {
+        state.remainingSeconds = 0;
+        pauseTimer();
+        if (state.mode === "focus") {
+          await logSession(state.plannedSeconds);
+        }
+      }
+      render();
+    }
+
+    async function logSession(durationSeconds) {
+      if (state.logged) return;
+      state.logged = true;
+      render();
+      fields.resultText.innerHTML = "Logging to SoL...";
+
+      const noteParts = [];
+      if (fields.notes.value.trim()) noteParts.push(fields.notes.value.trim());
+      noteParts.push(`Source: SoL Pomodoro`);
+      noteParts.push(`Duration: ${Math.round(durationSeconds / 60)} minutes`);
+
+      try {
+        const response = await fetch("/api/log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic: fields.topic.value.trim(),
+            sessionTitle: fields.sessionTitle.value,
+            notes: noteParts.join("\\n"),
+            date: today(),
+            durationSeconds
+          })
+        });
+        const body = await response.json();
+        if (!response.ok || !body.ok) throw new Error(body.error || "Log failed.");
+        fields.resultText.className = "result";
+        fields.resultText.innerHTML = `<span class="ok">Logged ${body.hours} hour(s) to Learning Log.</span>`;
+      } catch (error) {
+        state.logged = false;
+        fields.resultText.className = "result";
+        fields.resultText.innerHTML = `<span class="bad">${error.message}</span>`;
+      }
+      render();
+    }
+
+    fields.startButton.addEventListener("click", startTimer);
+    fields.pauseButton.addEventListener("click", pauseTimer);
+    fields.resetButton.addEventListener("click", resetTimer);
+    fields.logButton.addEventListener("click", () => {
+      const elapsed = state.plannedSeconds - state.remainingSeconds;
+      logSession(Math.max(60, elapsed));
+    });
+    fields.addTopicButton.addEventListener("click", useNewTopic);
+    fields.newTopic.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        useNewTopic();
+      }
+    });
+
+    fields.modeButtons.forEach((button) => {
+      button.addEventListener("click", () => setMode(button.dataset.mode));
+    });
+
+    [fields.focusMinutes, fields.shortMinutes, fields.longMinutes].forEach((field) => {
+      field.addEventListener("change", () => {
+        saveSettings();
+        if (!state.running) resetTimer();
+      });
+    });
+
+    [fields.sessionTitle, fields.topic].forEach((field) => {
+      field.addEventListener("change", saveSettings);
+      field.addEventListener("input", saveSettings);
+    });
+
+    loadSettings();
+    resetTimer();
+    loadCategories();
+  </script>
+</body>
+</html>
