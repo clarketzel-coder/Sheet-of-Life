@@ -32,6 +32,14 @@ The script requests only:
 https://www.googleapis.com/auth/gmail.readonly
 ```
 
+If you use `-FileProcessedEmail` or `-ArchiveProcessedEmail`, the script requests:
+
+```text
+https://www.googleapis.com/auth/gmail.modify
+```
+
+That broader scope is needed to apply Gmail labels or remove messages from the Inbox.
+
 ## First Run
 
 Verify the Notion connection and target Travel database:
@@ -56,6 +64,18 @@ Write to Notion:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -Apply
+```
+
+Write to Notion, then label the source email with an existing Gmail label:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -Apply -FileProcessedEmail -ProcessedLabelName "Travel"
+```
+
+Write to Notion, label the source email, and archive it from the Inbox:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\sol_sync_flights_from_gmail.ps1 -Apply -FileProcessedEmail -ProcessedLabelName "Travel" -ArchiveProcessedEmail
 ```
 
 ## Schedule Monthly

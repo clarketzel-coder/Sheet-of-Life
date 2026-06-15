@@ -7,13 +7,17 @@ param(
     [string]$GmailQuery = "",
     [string]$EventsDatabaseId = "37fe8e29-9eae-8113-9cc4-c88edca64657",
     [string]$TravelDatabaseId = "380e8e29-9eae-8119-a19e-f9f743f62bff",
+    [switch]$FileProcessedEmail,
+    [string]$ProcessedLabelName = "Travel",
+    [switch]$ArchiveProcessedEmail,
     [string]$NotionVersion = "2022-06-28",
     [string]$RedirectUri = "http://127.0.0.1:8788/"
 )
 
 $ErrorActionPreference = "Stop"
 
-$GmailScope = "https://www.googleapis.com/auth/gmail.readonly"
+$GmailReadOnlyScope = "https://www.googleapis.com/auth/gmail.readonly"
+$GmailModifyScope = "https://www.googleapis.com/auth/gmail.modify"
 $TokenPath = Join-Path -Path $PSScriptRoot -ChildPath ".sol_google_token.json"
 $StatePath = Join-Path -Path $PSScriptRoot -ChildPath ".sol_flight_sync_state.json"
 
@@ -89,6 +93,22 @@ function Invoke-GoogleTokenRequest {
     return Invoke-RestMethod -Method "POST" -Uri "https://oauth2.googleapis.com/token" -Body $Body -ContentType "application/x-www-form-urlencoded"
 }
 
+function Get-RequiredGmailScope {
+    if ($FileProcessedEmail -or $ArchiveProcessedEmail) {
+        return $GmailModifyScope
+    }
+    return $GmailReadOnlyScope
+}
+
+function Test-TokenHasScope {
+    param($SavedToken, [string]$RequiredScope)
+
+    if (-not $SavedToken.scope) {
+        return $false
+    }
+    return @("$($SavedToken.scope)" -split "\s+") -contains $RequiredScope
+}
+
 function Receive-LoopbackCode {
     param([string]$ExpectedState)
 
@@ -130,15 +150,17 @@ function Receive-LoopbackCode {
 
 function Get-GmailAccessToken {
     $client = Read-GoogleOAuthClient
+    $requiredScope = Get-RequiredGmailScope
 
     if (Test-Path -LiteralPath $TokenPath) {
         $saved = Get-Content -LiteralPath $TokenPath -Raw | ConvertFrom-Json
+        $savedTokenHasScope = Test-TokenHasScope -SavedToken $saved -RequiredScope $requiredScope
         $expiresAt = [DateTimeOffset]::Parse($saved.expires_at)
-        if ($saved.access_token -and $expiresAt -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) {
+        if ($saved.access_token -and $savedTokenHasScope -and $expiresAt -gt [DateTimeOffset]::UtcNow.AddMinutes(5)) {
             return $saved.access_token
         }
 
-        if ($saved.refresh_token) {
+        if ($saved.refresh_token -and $savedTokenHasScope) {
             $refreshed = Invoke-GoogleTokenRequest -Body @{
                 client_id = $client.ClientId
                 client_secret = $client.ClientSecret
@@ -154,7 +176,7 @@ function Get-GmailAccessToken {
 
     Add-Type -AssemblyName System.Web
     $state = [guid]::NewGuid().ToString("N")
-    $authUrl = "https://accounts.google.com/o/oauth2/v2/auth?client_id=$([uri]::EscapeDataString($client.ClientId))&redirect_uri=$([uri]::EscapeDataString($RedirectUri))&response_type=code&scope=$([uri]::EscapeDataString($GmailScope))&access_type=offline&prompt=consent&state=$state"
+    $authUrl = "https://accounts.google.com/o/oauth2/v2/auth?client_id=$([uri]::EscapeDataString($client.ClientId))&redirect_uri=$([uri]::EscapeDataString($RedirectUri))&response_type=code&scope=$([uri]::EscapeDataString($requiredScope))&access_type=offline&prompt=consent&state=$state"
 
     Write-Host "Opening Google authorization page..."
     Start-Process $authUrl
@@ -205,6 +227,77 @@ function Invoke-GmailApi {
         }
         throw
     }
+}
+
+function Invoke-GmailModifyApi {
+    param(
+        [string]$Path,
+        [string]$AccessToken,
+        $Body
+    )
+
+    $headers = @{ Authorization = "Bearer $AccessToken"; "Content-Type" = "application/json" }
+    $jsonBody = $Body | ConvertTo-Json -Depth 10
+    try {
+        return Invoke-RestMethod -Method "POST" -Uri "https://gmail.googleapis.com/gmail/v1$Path" -Headers $headers -Body $jsonBody
+    }
+    catch {
+        $details = ""
+        if ($_.Exception.Response) {
+            $stream = $_.Exception.Response.GetResponseStream()
+            if ($stream) {
+                $reader = [System.IO.StreamReader]::new($stream)
+                $details = $reader.ReadToEnd()
+                $reader.Close()
+            }
+        }
+
+        if ($details) {
+            throw "Gmail modify request failed: $details"
+        }
+        throw
+    }
+}
+
+function Get-GmailLabelId {
+    param([string]$LabelName, [string]$AccessToken)
+
+    if (-not $LabelName) {
+        return ""
+    }
+
+    $labelList = Invoke-GmailApi -AccessToken $AccessToken -Path "/users/me/labels"
+    $label = @($labelList.labels) | Where-Object { $_.name -ieq $LabelName } | Select-Object -First 1
+    if (-not $label) {
+        throw "Gmail label '$LabelName' was not found. Create that label in Gmail first, or pass a different -ProcessedLabelName."
+    }
+    return $label.id
+}
+
+function Set-GmailProcessedMessage {
+    param(
+        [string]$MessageId,
+        [string]$AccessToken,
+        [string]$LabelId
+    )
+
+    $addLabelIds = @()
+    $removeLabelIds = @()
+    if ($FileProcessedEmail -and $LabelId) {
+        $addLabelIds += $LabelId
+    }
+    if ($ArchiveProcessedEmail) {
+        $removeLabelIds += "INBOX"
+    }
+
+    if ($addLabelIds.Count -eq 0 -and $removeLabelIds.Count -eq 0) {
+        return
+    }
+
+    [void](Invoke-GmailModifyApi -AccessToken $AccessToken -Path "/users/me/messages/$MessageId/modify" -Body @{
+        addLabelIds = $addLabelIds
+        removeLabelIds = $removeLabelIds
+    })
 }
 
 function Get-MessageHeader {
@@ -760,6 +853,10 @@ if ($CheckNotion) {
 }
 
 $accessToken = Get-GmailAccessToken
+$processedLabelId = ""
+if ($FileProcessedEmail) {
+    $processedLabelId = Get-GmailLabelId -AccessToken $accessToken -LabelName $ProcessedLabelName
+}
 $state = Load-State
 $imported = @($state.importedMessageIds)
 $importedSegmentKeys = if ($state.PSObject.Properties.Name.Contains("importedSegmentKeys")) { @($state.importedSegmentKeys) } else { @() }
@@ -827,6 +924,16 @@ foreach ($candidate in $candidates) {
         $writtenSegmentKeys += $candidate.UniqueKey
     }
     Write-Host "Added: $($candidate.Name)"
+}
+
+foreach ($messageId in @($writtenMessageIds | Select-Object -Unique)) {
+    Set-GmailProcessedMessage -AccessToken $accessToken -MessageId $messageId -LabelId $processedLabelId
+    if ($FileProcessedEmail -or $ArchiveProcessedEmail) {
+        $actions = @()
+        if ($FileProcessedEmail) { $actions += "labeled '$ProcessedLabelName'" }
+        if ($ArchiveProcessedEmail) { $actions += "archived from Inbox" }
+        Write-Host "Filed Gmail message ${messageId}: $($actions -join ', ')"
+    }
 }
 
 $state.importedMessageIds = @($imported + $writtenMessageIds | Select-Object -Unique)
