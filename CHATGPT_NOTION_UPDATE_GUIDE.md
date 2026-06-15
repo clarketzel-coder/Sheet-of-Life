@@ -226,8 +226,7 @@ Dedicated travel reservation database. Use this instead of Events & Trips for fl
 - `Kind` select: Flight, Hotel, Car, Train, Other
 - `Status` select: Confirmed, Needs Review, Canceled
 - `Start` date
-- `End` date
-- `Calendar Time` date range for Notion Calendar display
+- `End` date range for Notion Calendar display
 - `Provider` rich text
 - `Confirmation Code` rich text
 - `Flight Number` rich text
