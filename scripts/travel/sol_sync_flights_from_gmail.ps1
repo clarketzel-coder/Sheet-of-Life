@@ -1061,11 +1061,15 @@ function New-RichText {
         $length = [Math]::Min($maxChunkLength, $Text.Length - $offset)
         $chunks += @{ type = "text"; text = @{ content = $Text.Substring($offset, $length) } }
     }
-    return ,$chunks
+    return @($chunks)
 }
 
-function TitleValue { param([string]$Value) return @{ title = (New-RichText -Text $Value) } }
-function TextValue { param([string]$Value) return @{ rich_text = (New-RichText -Text $Value) } }
+function TitleValue { param([string]$Value) return @{ title = @(New-RichText -Text $Value) } }
+function TextValue {
+    param([string]$Value)
+    if (-not $Value) { return @{ rich_text = @() } }
+    return @{ rich_text = @(New-RichText -Text $Value) }
+}
 function SelectValue { param([string]$Value) return @{ select = @{ name = $Value } } }
 function DateValue {
     param([string]$Value)
@@ -1114,7 +1118,20 @@ function Invoke-NotionApi {
         $parameters["Body"] = ($Body | ConvertTo-Json -Depth 30)
     }
 
-    return Invoke-RestMethod @parameters
+    try {
+        return Invoke-RestMethod @parameters
+    }
+    catch {
+        $details = $_.Exception.Message
+        if ($_.Exception.Response -and $_.Exception.Response.GetResponseStream()) {
+            $reader = [System.IO.StreamReader]::new($_.Exception.Response.GetResponseStream())
+            $responseText = $reader.ReadToEnd()
+            if ($responseText) {
+                $details = "$details`n$responseText"
+            }
+        }
+        throw "Notion API request failed: $Method $Path`n$details"
+    }
 }
 
 function Test-NotionTravelDatabase {
