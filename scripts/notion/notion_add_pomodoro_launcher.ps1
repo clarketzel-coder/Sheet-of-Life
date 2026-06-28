@@ -7,6 +7,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
 function Import-DotEnv {
     param([string]$Path)
 
@@ -69,7 +71,8 @@ function ConvertTo-NotionId {
     return "$($hex.Substring(0,8))-$($hex.Substring(8,4))-$($hex.Substring(12,4))-$($hex.Substring(16,4))-$($hex.Substring(20,12))"
 }
 
-Import-DotEnv -Path (Join-Path -Path $PSScriptRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path $RepoRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath ".env")
 $notionToken = Get-EnvValue -Name "NOTION_TOKEN"
 
 if (-not $DryRun -and -not $notionToken) {

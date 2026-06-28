@@ -7,6 +7,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
 function Import-DotEnv {
     param([string]$Path)
 
@@ -156,7 +158,8 @@ function Test-TemplateDueOnDate {
     return $false
 }
 
-Import-DotEnv -Path (Join-Path -Path $PSScriptRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path $RepoRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath ".env")
 $script:NotionToken = Get-EnvValue -Name "NOTION_TOKEN"
 
 if (-not $script:NotionToken) {
@@ -232,7 +235,7 @@ foreach ($template in $templates) {
             Zone = SelectValue $zone
             Cadence = SelectValue $cadence
             "Estimate Minutes" = NumberValue $estimateMinutes
-            Status = SelectValue "Scheduled"
+            Status = SelectValue "Not started"
             Notes = TextValue $notes
         }
     }

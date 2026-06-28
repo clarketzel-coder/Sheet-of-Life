@@ -7,4 +7,9 @@ daily_routine_simple.pdf
 morning_and_bedtime_routine.pdf
 .sol_google_token.json
 .sol_flight_sync_state.json
+.sol_command_center_state.json
+.sol_command_components_state.json
+.sol_mobile_home_state.json
+.sol_start_here_state.json
+.sol_home_sections_state.json
 google_oauth_client.json

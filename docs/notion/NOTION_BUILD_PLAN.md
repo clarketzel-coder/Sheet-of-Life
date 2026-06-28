@@ -106,7 +106,7 @@ Properties:
 - `Zone` select
 - `Cadence` select
 - `Estimate Minutes` number
-- `Status` select: Scheduled, Moved, Done, Skipped
+- `Status` select: Not started, Done, Skipped, Missed, Not needed
 - `Notes` rich text
 
 ### Apartment Zones

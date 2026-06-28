@@ -2,9 +2,11 @@
 
 ## Purpose
 
-Use this guide when asking ChatGPT, Codex, or another local agent to update the **Sheet of Life OS - Prototype** in Notion.
+Use this guide when asking ChatGPT, Codex, or another local agent to update the **Sheet of Life** Notion workspace.
 
 The Notion workspace is already set up. Future updates should preserve the current structure unless the user explicitly asks to change it.
+
+The canonical daily surface is **Sheet of Life Command Center**. Do not create another dashboard, mobile home, or start-here page by default. If the user says the system is not usable, improve the Command Center component pages.
 
 ## Safety Rules
 
@@ -30,6 +32,10 @@ Relevant files:
 NOTION_BUILD_PLAN.md
 notion_sheet_of_life_builder.ps1
 notion_create_todo_hub.ps1
+notion_start_here_builder.ps1
+notion_verify_home.ps1
+NOTION_CANONICAL_SURFACES.md
+HOME_USABILITY_CHECKLIST.md
 CHATGPT_NOTION_UPDATE_GUIDE.md
 .env
 ```
@@ -49,17 +55,57 @@ Parent page:
 37fe8e29-9eae-8030-a619-f456bc2274cc
 ```
 
-Prototype page:
+Infrastructure page:
 
 ```text
 37fe8e29-9eae-8159-bd12-d8bcbf34ec0c
 ```
 
-Prototype page title:
+Infrastructure page title:
 
 ```text
-Sheet of Life OS - Prototype
+Sheet of Life Infrastructure
 ```
+
+Canonical Command Center page:
+
+```text
+38ce8e29-9eae-81e2-9740-dddb8ee7deb3
+```
+
+Canonical Command Center page title:
+
+```text
+Sheet of Life Command Center
+```
+
+Archived legacy pages:
+
+```text
+00 - Sheet of Life Home:   38ce8e29-9eae-818c-b546-d60ea34d16c5
+Sheet of Life Mobile Home: 38ce8e29-9eae-81ac-850f-cc07cc7b203d
+Today Desk:                38ce8e29-9eae-81ed-914b-da6bd8b8c8ee
+Food Planner:              38ce8e29-9eae-814a-b3ae-cdaf56add1cf
+Capture Pad:               38ce8e29-9eae-8187-b407-d7df866e5af2
+Weekly Reset:              38ce8e29-9eae-813e-abfa-e1706962f932
+```
+
+Command Center component pages:
+
+```text
+Tasks
+Shopping
+Recipe Brain
+Food + Calendar
+Home / Chores
+People
+Running
+Learning
+Events + Travel
+Weekly Review + Pulse
+```
+
+Treat the raw databases as infrastructure. The user should normally start from `Sheet of Life Command Center`, then enter one of its component cards.
 
 ## Current Database IDs
 
@@ -77,6 +123,9 @@ Learning Log:    37fe8e29-9eae-816d-a682-e5ecf84db554
 Events & Trips:  37fe8e29-9eae-8113-9cc4-c88edca64657
 Weekly Review:   37fe8e29-9eae-8147-a043-fe457f112456
 Travel:          380e8e29-9eae-8119-a19e-f9f743f62bff
+Ingredients:     38ce8e29-9eae-8137-80c4-cedbdf6943c7
+Recipe Ingredients: 38ce8e29-9eae-8131-ba98-de6b87d9f934
+Recipe Suggestions: 38ce8e29-9eae-81bc-89f9-c81ec968797d
 ```
 
 If the to-do hub has been created, add its ID here:
@@ -137,7 +186,8 @@ Use `POST /v1/pages` to create database rows by setting:
 - `Zone` select
 - `Cadence` select
 - `Estimate Minutes` number
-- `Status` select: Scheduled, Moved, Done, Skipped
+- `Status` select: Not started, Done, Skipped, Missed, Not needed
+- `Reminder Policy` select: Chore reminder, No reminder
 - `Notes` rich text
 
 ### Apartment Zones
@@ -150,12 +200,15 @@ Use `POST /v1/pages` to create database rows by setting:
 ### Recipes
 
 - `Name` title
+- `Status` select: To Process, Ready, Cook Soon, Archived
 - `Cuisine` multi-select
 - `Servings` number
 - `Calories` number
 - `Protein` number
 - `Ingredients` rich text
 - `Instructions` rich text
+- `Source URL` URL
+- `Raw Recipe Notes` rich text
 - `Active` checkbox
 
 ### Meal Plan
@@ -164,6 +217,7 @@ Use `POST /v1/pages` to create database rows by setting:
 - `Date` date
 - `Slot` select: Breakfast, Lunch, Dinner, Snack
 - `Recipe` rich text
+- `Recipe Link` relation to Recipes
 - `Type` select: Cook, Leftover, Quick, Eat Out
 - `Notes` rich text
 
@@ -214,19 +268,53 @@ Use `POST /v1/pages` to create database rows by setting:
 - `Name` title
 - `Date` date
 - `End Date` date
+- `Calendar Block` date range for Notion Calendar display
+- `Calendar Status` select: Draft, Tentative, Confirmed, Needs Review, Canceled
+- `Trip Key` rich text
+- `Trip Status` select: Planned, Active, Completed, Canceled
 - `Category` select
 - `Type` select: Event, Trip, Appointment, Birthday
+- `Food Included` checkbox
+- `Food Plan` select: Food provided, Eat out, Bring food, Snack only, No food, Decide later
+- `Meal Slot` select: Breakfast, Lunch, Dinner, Snack
+- `Food Notes` rich text
 - `Notes` rich text
+
+### Ingredients
+
+- `Name` title
+- `Category` select
+
+### Recipe Ingredients
+
+- `Name` title
+- `Recipe` relation to Recipes
+- `Ingredient` relation to Ingredients
+- `Raw Amount` rich text
+- `Required` checkbox
+
+### Recipe Suggestions
+
+- `Suggestion` title
+- `Source Recipe` relation to Recipes
+- `Suggested Recipe` relation to Recipes
+- `Score` number
+- `Shared Ingredients` rich text
 
 ### Travel
 
-Dedicated travel reservation database. Use this instead of Events & Trips for flights, hotels, rental cars, trains, and other travel segments.
+Canonical travel database. Use this for both trip envelopes and flight segments. Do not create travel rows in Events & Trips.
 
 - `Name` title
-- `Kind` select: Flight, Hotel, Car, Train, Other
+- `Kind` select: Trip, Flight, Hotel, Car, Train, Other
 - `Status` select: Confirmed, Needs Review, Canceled
 - `Start` date
 - `End` date range for Notion Calendar display
+- `Calendar Block` date range for Notion Calendar display
+- `Calendar Category` select: Travel
+- `Parent Trip` relation to Travel
+- `Trip Key` rich text
+- `Segment Role` select: Trip, Outbound, Return, Connection, Other
 - `Provider` rich text
 - `Confirmation Code` rich text
 - `Flight Number` rich text
@@ -279,9 +367,26 @@ Central action layer for Sheet of Life. Use this instead of trying to make one c
 1. Parse the user's requested change into specific records or schema updates.
 2. Identify the target database by name and ID.
 3. Query first if the request may update an existing record.
-4. Create or patch only the relevant records.
-5. Do not duplicate obvious existing records unless the user asks for a new instance.
-6. Report what changed with record names and target databases.
+4. For workflow or usability requests, update `Sheet of Life Command Center` or one of its component pages with `notion_refine_command_center.ps1` or targeted Notion API changes instead of making a new dashboard page.
+5. Verify the Command Center with `notion_verify_command_center.ps1`.
+
+## Calendar Harmony Rules
+
+- Reminders are allowed for chores only.
+- Events, travel, meals, runs, and other life blocks should be categorized and quiet by default.
+- Timed calendar items should use a single Notion date property with both `start` and `end`.
+- Events & Trips is for non-travel events only. Do not use it for trip envelopes.
+- For `Travel`, use `Calendar Block` for Notion Calendar display; `Start` and `End` preserve parsed source timing.
+- Travel-agent automation should create flight details only unless the user explicitly enables non-flight travel parsing.
+- A multi-day trip should be one `Travel` row with `Kind = Trip`, a stable `Trip Key`, and a `Calendar Block` covering the full trip span.
+- Flight rows in `Travel` should link to their parent trip through `Parent Trip`, share the same `Trip Key`, and use `Segment Role` for outbound/return/context.
+
+After applying changes:
+
+- Create or patch only the relevant records.
+- Do not duplicate obvious existing records unless the user asks for a new instance.
+- Report what changed with record names and target databases.
+- For Home or meal-planning changes, run the verifier when possible.
 
 ## Useful Property JSON Shapes
 
@@ -346,7 +451,7 @@ Template: Clean bathroom
 Zone: Bathroom
 Cadence: Weekly
 Estimate Minutes: 35
-Status: Scheduled
+Status: Not started
 Notes: Weekly bathroom reset.
 ```
 
@@ -355,6 +460,7 @@ Add a recipe:
 ```text
 Add a Recipes record:
 Name: Turkey taco bowls
+Status: Ready
 Cuisine: Mexican, Meal prep
 Servings: 4
 Calories: 520
@@ -364,6 +470,13 @@ Instructions: Cook turkey, season, assemble bowls.
 Active: true
 ```
 
+Recipe workflow:
+
+- Put rough recipe captures in Recipes with `Status = To Process` and preserve source text in `Raw Recipe Notes`.
+- When ingredients and instructions are cleaned up, set `Status = Ready`.
+- Add linked rows in `Recipe Ingredients` for recommendation-style ingredient overlap.
+- Use `Cook Soon` only for recipes the user wants surfaced in the Command Center food and recipe components.
+
 Add a meal plan entry:
 
 ```text
@@ -372,9 +485,17 @@ Name: Turkey taco bowls dinner
 Date: 2026-06-17
 Slot: Dinner
 Recipe: Turkey taco bowls
+Recipe Link: link the Turkey taco bowls recipe row when possible
 Type: Cook
 Notes: Make enough for leftovers.
 ```
+
+Meal-planning workflow:
+
+- Use Meal Plan for the actual calendar surface.
+- Use `Type = Leftover`, `Quick`, or `Eat Out` when the user is not cooking.
+- Link `Recipe Link` when the plan uses a real recipe; leave it empty for leftovers, trivia food, eating out, or loose plans.
+- Use Events & Trips food fields for events that include food, then decide whether Meal Plan needs a related meal row.
 
 Add a task mapped to a Sheet of Life area:
 
@@ -402,6 +523,8 @@ C:\Users\Clark\OneDrive\Documents\Sheet of Life\CHATGPT_NOTION_UPDATE_GUIDE.md
 
 Do not ask me to paste the Notion token. Read NOTION_TOKEN from local environment or .env. Use the Notion REST API. Preserve the existing setup unless I explicitly request a schema change. Before destructive changes, ask for confirmation.
 
+The single daily starting surface is Sheet of Life Command Center. Do not create a new dashboard by default; improve the Command Center or one of its component pages.
+
 My requested update:
 <write the update here>
 ```
@@ -424,4 +547,22 @@ C:\Users\Clark\OneDrive\Documents\Sheet of Life\notion_create_todo_hub.ps1
 
 Run it once to create a central To-Dos database with relations to the existing Sheet of Life databases. Use `-DryRun` first, then run with `-SeedStarterTasks` if starter task rows are desired.
 
-For day-to-day updates, write a small targeted script or use direct Notion API calls against the database IDs in this guide.
+The current daily-use Home surface is handled by:
+
+```text
+C:\Users\Clark\OneDrive\Documents\Sheet of Life\notion_start_here_builder.ps1
+```
+
+Use this for normal UX/layout changes to the working surface:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\notion_start_here_builder.ps1 -ArchiveExistingChildren
+```
+
+Then verify:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\notion_verify_home.ps1
+```
+
+For day-to-day updates, write a small targeted script or use direct Notion API calls against the database IDs in this guide. For workflow and usability updates, prefer improving the existing Home launcher or its four work areas. Manual final polish in the Notion UI may still be needed for sidebar order, favoriting, compact density, and hiding low-signal properties.

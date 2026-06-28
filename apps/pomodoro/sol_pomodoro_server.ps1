@@ -6,6 +6,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$RepoRoot = $PSScriptRoot
+$currentPath = Resolve-Path -LiteralPath $PSScriptRoot
+while ($currentPath) {
+    if (Test-Path -LiteralPath (Join-Path -Path $currentPath -ChildPath ".git")) {
+        $RepoRoot = $currentPath.Path
+        break
+    }
+    $parentPath = Split-Path -Path $currentPath -Parent
+    if (-not $parentPath -or $parentPath -eq $currentPath.Path) {
+        break
+    }
+    $currentPath = Resolve-Path -LiteralPath $parentPath
+}
+
 function Import-DotEnv {
     param([string]$Path)
 
@@ -56,13 +70,39 @@ function SelectValue { param([string]$Value) return @{ select = @{ name = $Value
 function NumberValue { param([double]$Value) return @{ number = $Value } }
 function DateValue { param([string]$Value) return @{ date = @{ start = $Value } } }
 
+function Get-LearningDatabase {
+    $notionToken = Get-EnvValue -Name "NOTION_TOKEN"
+    if (-not $notionToken) {
+        throw "Missing NOTION_TOKEN. Set it in the process/user environment or in a local .env file."
+    }
+
+    $headers = @{
+        Authorization = "Bearer $notionToken"
+        "Notion-Version" = $NotionVersion
+    }
+
+    return Invoke-RestMethod -Method "GET" -Uri "https://api.notion.com/v1/databases/$LearningLogDatabaseId" -Headers $headers
+}
+
+function Get-LearningPropertyMap {
+    $database = Get-LearningDatabase
+    $properties = @{}
+    foreach ($property in $database.properties.PSObject.Properties) {
+        $properties[$property.Name] = $property.Value
+    }
+    return $properties
+}
+
 function Add-LearningLogEntry {
     param(
         [Parameter(Mandatory = $true)][string]$Topic,
         [Parameter(Mandatory = $true)][double]$Hours,
         [Parameter(Mandatory = $true)][string]$Date,
         [string]$SessionTitle = "",
-        [string]$Notes = ""
+        [string]$Notes = "",
+        [string]$Outcome = "",
+        [string]$NextStep = "",
+        [string]$Source = "Pomodoro"
     )
 
     $notionToken = Get-EnvValue -Name "NOTION_TOKEN"
@@ -76,16 +116,22 @@ function Add-LearningLogEntry {
         "Content-Type" = "application/json"
     }
 
+    $databaseProperties = Get-LearningPropertyMap
     $entryName = if ($SessionTitle) { "$SessionTitle - $Date" } else { "$Topic Pomodoro - $Date" }
+    $properties = @{
+        Name = TitleValue $entryName
+        Date = DateValue $Date
+        Topic = SelectValue $Topic
+        Hours = NumberValue $Hours
+        Notes = TextValue $Notes
+    }
+    if ($Outcome -and $databaseProperties.ContainsKey("Outcome")) { $properties.Outcome = SelectValue $Outcome }
+    if ($NextStep -and $databaseProperties.ContainsKey("Next Step")) { $properties["Next Step"] = TextValue $NextStep }
+    if ($Source -and $databaseProperties.ContainsKey("Source")) { $properties.Source = SelectValue $Source }
+
     $body = @{
         parent = @{ database_id = $LearningLogDatabaseId }
-        properties = @{
-            Name = TitleValue $entryName
-            Date = DateValue $Date
-            Topic = SelectValue $Topic
-            Hours = NumberValue $Hours
-            Notes = TextValue $Notes
-        }
+        properties = $properties
     }
 
     $jsonBody = $body | ConvertTo-Json -Depth 30
@@ -213,7 +259,7 @@ function Write-JsonResponse {
     Write-HttpResponse -Stream $Stream -StatusCode $StatusCode -ContentType "application/json; charset=utf-8" -Body $bytes
 }
 
-Import-DotEnv -Path (Join-Path -Path $PSScriptRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path $RepoRoot -ChildPath ".env")
 
 $htmlPath = Join-Path -Path $PSScriptRoot -ChildPath "sol_pomodoro.html"
 if (-not (Test-Path -LiteralPath $htmlPath)) {
@@ -263,6 +309,8 @@ try {
                 $topic = [string]$payload.topic
                 $sessionTitle = [string]$payload.sessionTitle
                 $notes = [string]$payload.notes
+                $outcome = [string]$payload.outcome
+                $nextStep = [string]$payload.nextStep
                 $date = [string]$payload.date
                 $durationSeconds = [double]$payload.durationSeconds
 
@@ -271,7 +319,7 @@ try {
                 if ($durationSeconds -le 0) { throw "Duration must be greater than zero." }
 
                 $hours = [Math]::Round(($durationSeconds / 3600), 3)
-                $result = Add-LearningLogEntry -Topic $topic -Hours $hours -Date $date -SessionTitle $sessionTitle -Notes $notes
+                $result = Add-LearningLogEntry -Topic $topic -Hours $hours -Date $date -SessionTitle $sessionTitle -Notes $notes -Outcome $outcome -NextStep $nextStep -Source "Pomodoro"
 
                 Write-JsonResponse -Stream $stream -StatusCode 200 -Body @{
                     ok = $true

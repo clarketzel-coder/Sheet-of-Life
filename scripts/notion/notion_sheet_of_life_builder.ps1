@@ -8,6 +8,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
 function Import-DotEnv {
     param([string]$Path)
 
@@ -238,7 +240,7 @@ $databaseDefinitions = @(
             @{ Name = "Zone"; Type = "select"; Options = @("Kitchen", "Bathroom", "Bedroom", "Floors", "Living", "Admin") },
             @{ Name = "Cadence"; Type = "select"; Options = @("Daily", "Weekly", "Biweekly", "Monthly", "Quarterly") },
             @{ Name = "Estimate Minutes"; Type = "number" },
-            @{ Name = "Status"; Type = "select"; Options = @("Scheduled", "Moved", "Done", "Skipped") },
+            @{ Name = "Status"; Type = "select"; Options = @("Not started", "Done", "Skipped", "Missed", "Not needed") },
             @{ Name = "Notes"; Type = "rich_text" }
         )
     },
@@ -324,6 +326,9 @@ $databaseDefinitions = @(
             @{ Name = "Date"; Type = "date" },
             @{ Name = "Topic"; Type = "select"; Options = @() },
             @{ Name = "Hours"; Type = "number" },
+            @{ Name = "Outcome"; Type = "select"; Options = @("Read", "Practiced", "Built", "Reviewed", "Debugged", "Watched") },
+            @{ Name = "Next Step"; Type = "rich_text" },
+            @{ Name = "Source"; Type = "select"; Options = @("Manual", "Pomodoro", "Daily Update", "Import") },
             @{ Name = "Notes"; Type = "rich_text" }
         )
     },
@@ -372,7 +377,8 @@ $choreTemplates = @(
     @{ Name = "Deep clean behind appliances"; Zone = "Kitchen"; Cadence = "Quarterly"; PreferredDay = "Sat"; FlexDays = 14; EstimateMinutes = 60; Notes = "Pull forward safely where possible." }
 )
 
-Import-DotEnv -Path (Join-Path -Path $PSScriptRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path $RepoRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath ".env")
 
 if (-not $ParentPageId) {
     $ParentPageId = Get-EnvValue -Name "NOTION_PARENT_PAGE_ID"

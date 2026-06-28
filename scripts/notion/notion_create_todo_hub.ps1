@@ -22,6 +22,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
 function Import-DotEnv {
     param([string]$Path)
 
@@ -275,7 +277,8 @@ function New-StarterTask {
     [void](Invoke-NotionApi -Method "POST" -Path "/pages" -Body $body)
 }
 
-Import-DotEnv -Path (Join-Path -Path $PSScriptRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path $RepoRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) -ChildPath ".env")
 $script:NotionToken = Get-EnvValue -Name "NOTION_TOKEN"
 
 if (-not $DryRun -and -not $script:NotionToken) {

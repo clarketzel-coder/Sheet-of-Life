@@ -8,6 +8,7 @@ param(
     [string]$GmailQuery = "",
     [string]$EventsDatabaseId = "37fe8e29-9eae-8113-9cc4-c88edca64657",
     [string]$TravelDatabaseId = "380e8e29-9eae-8119-a19e-f9f743f62bff",
+    [switch]$IncludeNonFlightTravel,
     [switch]$FileProcessedEmail,
     [switch]$FileImportedEmail,
     [string]$ProcessedLabelName = "Travel",
@@ -18,10 +19,24 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$RepoRoot = $PSScriptRoot
+$currentPath = Resolve-Path -LiteralPath $PSScriptRoot
+while ($currentPath) {
+    if (Test-Path -LiteralPath (Join-Path -Path $currentPath -ChildPath ".git")) {
+        $RepoRoot = $currentPath.Path
+        break
+    }
+    $parentPath = Split-Path -Path $currentPath -Parent
+    if (-not $parentPath -or $parentPath -eq $currentPath.Path) {
+        break
+    }
+    $currentPath = Resolve-Path -LiteralPath $parentPath
+}
+
 $GmailReadOnlyScope = "https://www.googleapis.com/auth/gmail.readonly"
 $GmailModifyScope = "https://www.googleapis.com/auth/gmail.modify"
-$TokenPath = Join-Path -Path $PSScriptRoot -ChildPath ".sol_google_token.json"
-$StatePath = Join-Path -Path $PSScriptRoot -ChildPath ".sol_flight_sync_state.json"
+$TokenPath = Join-Path -Path $RepoRoot -ChildPath ".sol_google_token.json"
+$StatePath = Join-Path -Path $RepoRoot -ChildPath ".sol_flight_sync_state.json"
 
 function Import-DotEnv {
     param([string]$Path)
@@ -62,7 +77,7 @@ function Read-GoogleOAuthClient {
     $clientId = Get-EnvValue -Name "GMAIL_CLIENT_ID"
     $clientSecret = Get-EnvValue -Name "GMAIL_CLIENT_SECRET"
 
-    $clientPath = Join-Path -Path $PSScriptRoot -ChildPath "google_oauth_client.json"
+    $clientPath = Join-Path -Path $RepoRoot -ChildPath "google_oauth_client.json"
     if ((-not $clientId -or -not $clientSecret) -and (Test-Path -LiteralPath $clientPath)) {
         $client = Get-Content -LiteralPath $clientPath -Raw | ConvertFrom-Json
         $desktop = if ($client.installed) { $client.installed } else { $client.web }
@@ -910,25 +925,27 @@ function ConvertFrom-TravelEmail {
         return $items
     }
 
-    $items = ConvertFrom-JsonLdOtherReservations -Html $html -MessageId $Message.id -Subject $Subject -From $From
-    if ($items.Count -gt 0) {
-        return $items
-    }
-
     $items = ConvertFrom-UnitedHtmlFlights -Html $html -MessageId $Message.id -Subject $Subject -From $From
     if ($items.Count -gt 0) {
         return $items
     }
 
-    $items = ConvertFrom-TravelEmailHeuristic -Message $Message -Subject $Subject -From $From
-    if ($items.Count -gt 0) {
-        return $items
+    if ($IncludeNonFlightTravel) {
+        $items = ConvertFrom-JsonLdOtherReservations -Html $html -MessageId $Message.id -Subject $Subject -From $From
+        if ($items.Count -gt 0) {
+            return $items
+        }
+
+        $items = ConvertFrom-TravelEmailHeuristic -Message $Message -Subject $Subject -From $From
+        if ($items.Count -gt 0) {
+            return $items
+        }
     }
 
     $fallback = ConvertFrom-FlightEmailFallback -Message $Message
     return ,@{
         Name = $fallback.Name
-        Kind = "Other"
+        Kind = "Flight"
         Status = "Needs Review"
         Start = $fallback.Start
         End = $fallback.End
@@ -1104,7 +1121,7 @@ function Test-NotionTravelDatabase {
     param([string]$NotionToken)
 
     $database = Invoke-NotionApi -Method "GET" -Path "/databases/$TravelDatabaseId" -NotionToken $NotionToken
-    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Location", "Address", "Source Message ID", "Source Subject", "Unique Key", "Notes")
+    $requiredProperties = @("Name", "Kind", "Status", "Start", "End", "Calendar Block", "Calendar Category", "Provider", "Confirmation Code", "Flight Number", "From", "To", "Location", "Address", "Source Message ID", "Source Subject", "Unique Key", "Notes")
     $missingProperties = @($requiredProperties | Where-Object { -not $database.properties.PSObject.Properties.Name.Contains($_) })
 
     if ($missingProperties.Count -gt 0) {
@@ -1122,6 +1139,7 @@ function Add-TravelItem {
         Kind = SelectValue $Item.Kind
         Status = SelectValue $Item.Status
         Start = DateValue $Item.Start
+        "Calendar Category" = SelectValue "Travel"
         Provider = TextValue $Item.Provider
         "Confirmation Code" = TextValue $Item.ConfirmationCode
         "Flight Number" = TextValue $Item.FlightNumber
@@ -1137,6 +1155,10 @@ function Add-TravelItem {
 
     if ($Item.End) {
         $properties["End"] = DateRangeValue -Start $Item.Start -End $Item.End
+        $properties["Calendar Block"] = DateRangeValue -Start $Item.Start -End $Item.End
+    }
+    elseif ($Item.Start) {
+        $properties["Calendar Block"] = DateValue $Item.Start
     }
 
     $body = @{
@@ -1147,7 +1169,7 @@ function Add-TravelItem {
     return Invoke-NotionApi -Method "POST" -Path "/pages" -NotionToken $NotionToken -Body $body
 }
 
-Import-DotEnv -Path (Join-Path -Path $PSScriptRoot -ChildPath ".env")
+Import-DotEnv -Path (Join-Path -Path $RepoRoot -ChildPath ".env")
 Add-Type -AssemblyName System.Web
 
 $notionToken = Get-EnvValue -Name "NOTION_TOKEN"

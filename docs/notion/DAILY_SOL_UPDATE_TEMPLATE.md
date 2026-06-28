@@ -127,6 +127,8 @@ Learning:
 - Topic:
   Date:
   Hours:
+  Outcome:
+  Next step:
   Notes:
 ```
 

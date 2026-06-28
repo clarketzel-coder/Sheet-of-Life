@@ -366,6 +366,18 @@
         </div>
       </div>
 
+      <div class="field">
+        <label for="outcome">Outcome</label>
+        <select id="outcome">
+          <option>Practiced</option>
+          <option>Read</option>
+          <option>Built</option>
+          <option>Reviewed</option>
+          <option>Debugged</option>
+          <option>Watched</option>
+        </select>
+      </div>
+
       <div class="grid">
         <div class="field">
           <label for="focusMinutes">Focus</label>
@@ -384,6 +396,11 @@
       <div class="field">
         <label for="notes">Notes</label>
         <textarea id="notes" placeholder="What did this session move forward?"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="nextStep">Next step</label>
+        <input id="nextStep" autocomplete="off" placeholder="Smallest useful follow-up">
       </div>
 
       <p class="hint">Focus sessions log to the SoL Learning Log when completed. Breaks stay local.</p>
@@ -417,10 +434,12 @@
       topic: document.querySelector("#topic"),
       newTopic: document.querySelector("#newTopic"),
       addTopicButton: document.querySelector("#addTopicButton"),
+      outcome: document.querySelector("#outcome"),
       focusMinutes: document.querySelector("#focusMinutes"),
       shortMinutes: document.querySelector("#shortMinutes"),
       longMinutes: document.querySelector("#longMinutes"),
       notes: document.querySelector("#notes"),
+      nextStep: document.querySelector("#nextStep"),
       resultText: document.querySelector("#resultText"),
       modeButtons: [...document.querySelectorAll("[data-mode]")]
     };
@@ -454,9 +473,11 @@
         sessionTitle: fields.sessionTitle.value,
         topic: fields.topic.value,
         newTopic: fields.newTopic.value,
+        outcome: fields.outcome.value,
         focusMinutes: fields.focusMinutes.value,
         shortMinutes: fields.shortMinutes.value,
-        longMinutes: fields.longMinutes.value
+        longMinutes: fields.longMinutes.value,
+        nextStep: fields.nextStep.value
       }));
     }
 
@@ -570,6 +591,7 @@
 
       const noteParts = [];
       if (fields.notes.value.trim()) noteParts.push(fields.notes.value.trim());
+      if (fields.nextStep.value.trim()) noteParts.push(`Next step: ${fields.nextStep.value.trim()}`);
       noteParts.push(`Source: SoL Pomodoro`);
       noteParts.push(`Duration: ${Math.round(durationSeconds / 60)} minutes`);
 
@@ -581,6 +603,8 @@
             topic: fields.topic.value.trim(),
             sessionTitle: fields.sessionTitle.value,
             notes: noteParts.join("\\n"),
+            outcome: fields.outcome.value,
+            nextStep: fields.nextStep.value.trim(),
             date: today(),
             durationSeconds
           })
@@ -623,7 +647,7 @@
       });
     });
 
-    [fields.sessionTitle, fields.topic].forEach((field) => {
+    [fields.sessionTitle, fields.topic, fields.outcome, fields.nextStep].forEach((field) => {
       field.addEventListener("change", saveSettings);
       field.addEventListener("input", saveSettings);
     });
